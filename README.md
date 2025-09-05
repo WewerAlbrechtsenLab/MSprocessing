@@ -1,2 +1,2 @@
-# MSpreprocessing
-A library of functions to preprocess mass spectrometry-based proteomics data
+# MSprocessing
+A library of functions to preprocess and analyze mass spectrometry-based proteomics data
