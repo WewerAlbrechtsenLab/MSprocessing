@@ -1137,3 +1137,136 @@ def plot_umap(df: pd.DataFrame, color_by: str, save_img = False, save_path="UMAP
             fig.write_html(save_path)
 
     fig.show()
+
+
+
+
+
+def plot_sample_box(df):
+    if "sample_name" not in df.index.names:
+        raise ValueError("'sample_name' must be one of the index levels.")
+
+    df_sorted = df.reset_index().sort_values("sample_name")
+    protein_cols = df.columns[df.columns.str.startswith("A") | df.columns.str.startswith("Q")]
+    sample_names = df_sorted["sample_name"].astype(str).tolist()
+    df_sorted = df_sorted.set_index("sample_name")
+    
+    fig = go.Figure()
+    medians = []
+
+    for i, sample in enumerate(sample_names):
+        values = df_sorted.loc[sample, protein_cols]
+        if isinstance(values, pd.Series):
+            values = values.to_frame().T
+        flat_values = values.to_numpy().flatten()
+        fig.add_trace(go.Box(
+            y=flat_values,
+            x=[i] * len(flat_values),
+            boxpoints=False,
+            line=dict(width=1),
+            marker=dict(size=3, color="gray"),
+            showlegend=False,
+            hovertext=[sample] * len(flat_values),
+            hoverinfo="text+y"
+        ))
+        medians.append(np.nanmedian(flat_values))
+
+    medians = np.array(medians)
+    overall_median = float(np.nanmedian(medians))
+
+    fig.add_trace(go.Scatter(
+        x=[-0.5, len(sample_names) - 0.5],
+        y=[overall_median, overall_median],
+        mode="lines",
+        name=f"overall median = {overall_median:.3g}",
+        line=dict(dash="solid", width=2, color="red"),
+    ))
+
+    trend_df = pd.DataFrame({
+        "sample_order": np.arange(len(medians)),
+        "median": medians
+    })
+
+    try:
+        trend_fig = px.scatter(trend_df, x="sample_order", y="median", trendline="lowess")
+        trendline = trend_fig.data[1]
+        trendline.name = "trend (median)"
+        fig.add_trace(trendline)
+    except Exception:
+        roll = pd.Series(medians).rolling(9, center=True, min_periods=1).median()
+        fig.add_trace(go.Scatter(
+            x=trend_df["sample_order"],
+            y=roll,
+            mode="lines",
+            name="trend (median)",
+            line=dict(color="blue")
+        ))
+
+    fig.update_layout(
+        title="Protein intensity distribution per sample",
+        xaxis=dict(
+            title="sample order",
+            showticklabels=False,
+            showgrid=False
+        ),
+        yaxis_title="protein intensity",
+        template="simple_white",
+        width=1000,
+        height=500,
+        showlegend=False,
+        margin=dict(l=10, r=10, t=40, b=80),
+    )
+
+    fig.show()
+
+
+
+
+
+def robust_zscore(row):
+    med = np.median(row)
+    mad = np.median(np.abs(row - med))
+    if mad == 0:
+        return np.zeros_like(row)
+    return (row - med) / mad
+
+
+
+
+def normalize_sample(
+    df: pd.DataFrame,
+    method: str = "median",  # "mean", "median", "cscore"
+    round_digits: int = 3
+):
+    """
+    Normalize a DataFrame so that all samples are adjusted based on the selected method.
+    df : rows are samples, columns are features
+    method : 
+        - "mean": Normalize each sample to have the same mean.
+        - "median": Normalize each sample to have the same median.
+        - "cscore": Row-wise robust z-score (centered score).
+    round_digits : number of decimal digits to round the result.
+    """
+    if method not in {"mean", "median", "cscore"}:
+        raise ValueError("method must be one of: 'mean', 'median', 'cscore'")
+
+    if method in {"mean", "median"}:
+        if method == "mean":
+            center_values = df.mean(axis=1)
+            global_center = center_values.mean()
+        else:
+            center_values = df.median(axis=1)
+            global_center = center_values.median()
+
+        # Normalize to global center
+        df_norm = df.div(center_values, axis=0).mul(global_center)
+
+    elif method == "cscore":
+
+        df_norm = df.apply(robust_zscore, axis=1, result_type="broadcast")
+
+    return df_norm.round(round_digits)
+
+    
+
+
