@@ -788,8 +788,8 @@ def sample_density_heatmap(
 
     index_cols = list(df.index.names or [])
     dfn = (df.reset_index()
-             .drop([c for c in index_cols if c != "sample_name"], axis=1)
-             .set_index("sample_name")
+             .drop([c for c in index_cols if c != "sample_order"], axis=1)
+             .set_index("sample_order")
              .sort_index())
 
     vmin = float(dfn.min().min())
@@ -837,17 +837,17 @@ def plot_sample_means(
     save_path: str = "sample_means.html",
 ):
     """
-    Plot per-sample means ordered by sample_name, with a global horizontal mean line and a trendline.
+    Plot per-sample means ordered by sample_order, with a global horizontal mean line and a trendline.
 
-    df : wide matrix with samples in the index (must include 'sample_name'); features as columns; numeric values.
+    df : wide matrix with samples in the index (must include 'sample_order'); features as columns; numeric values.
     save_img : write the figure to save_path when True.
     save_path : destination file for the figure.
     """
 
     index_cols = list(df.index.names or [])
     dfn = (df.reset_index()
-             .drop([c for c in index_cols if c != "sample_name"], axis=1)
-             .set_index("sample_name")
+             .drop([c for c in index_cols if c != "sample_order"], axis=1)
+             .set_index("sample_order")
              .sort_index())
 
     means = dfn.mean(axis=1, numeric_only=True)   
@@ -1144,12 +1144,12 @@ def plot_umap(df: pd.DataFrame, color_by: str, save_img = False, save_path="UMAP
 
 def plot_sample_box(df):
     if "sample_name" not in df.index.names:
-        raise ValueError("'sample_name' must be one of the index levels.")
+        raise ValueError("'sample_order' must be one of the index levels.")
 
-    df_sorted = df.reset_index().sort_values("sample_name")
+    df_sorted = df.reset_index().sort_values("sample_order")
     protein_cols = df.columns[df.columns.str.startswith("A") | df.columns.str.startswith("Q")]
-    sample_names = df_sorted["sample_name"].astype(str).tolist()
-    df_sorted = df_sorted.set_index("sample_name")
+    sample_names = df_sorted["sample_order"].astype(int).tolist()
+    df_sorted = df_sorted.set_index("sample_order")
     
     fig = go.Figure()
     medians = []
@@ -1268,5 +1268,24 @@ def normalize_sample(
     return df_norm.round(round_digits)
 
     
+
+
+
+def get_sample_order(df: pd.DataFrame) -> pd.Series:
+    plate = df.index.get_level_values("plate_nr").astype(str).str.extract(r"(\d+)")[0].astype(int)
+    pos   = df.index.get_level_values("plate_position").astype(str)
+
+    rows = pos.str.extract(r"^([A-Za-z]+)")[0]
+    cols = pos.str.extract(r"(\d+)$")[0].astype(int)
+    
+
+    row_num = rows.str.upper().apply(lambda s: sum((ord(c) - 64) * (26 ** i) for i, c in enumerate(s[::-1])))
+
+    order_pos = np.lexsort((cols.to_numpy(), row_num.to_numpy(), plate.to_numpy()))
+    ranks = np.empty(len(df), dtype=int)
+    ranks[order_pos] = np.arange(1, len(df) + 1)
+
+    return df.set_index(pd.Index(ranks, name="sample_order"), append=True)
+
 
 
