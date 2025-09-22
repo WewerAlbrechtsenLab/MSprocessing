@@ -4,21 +4,22 @@ on: [push, pull_request]
 
 jobs:
   test:
-    runs-on: windows-latest
+    runs-on: windows-latest  # or ubuntu-latest if you prefer Linux
+
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v3
+    - uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.13'
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.13"
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install --no-deps alphastats==0.7.1
+        pip install -r requirements.txt --no-deps
+        pip install -r requirements.txt
 
-      - name: Run tests
-        run: pytest -v
+    - name: Run tests
+      run: pytest -v
