@@ -37,10 +37,8 @@ def split_proteome_meta(df: pd.DataFrame, index_col: str):
     index_cols = list(df.index.names)
     tmp = df.reset_index()
     protein_cols = [c for c in tmp.columns if c not in index_cols]
-
     mat = tmp.set_index(index_col)[protein_cols].copy()
-    meta = tmp[index_cols].copy()
-    meta = tmp.set_index(index_col).copy()
+    meta = tmp[index_cols].set_index(index_col).copy()
 
     return mat, meta
 

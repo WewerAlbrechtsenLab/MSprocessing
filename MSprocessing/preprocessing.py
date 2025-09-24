@@ -40,6 +40,8 @@ def load_proteomes(path, clean_columns = False, extension : str = None):
                 cleaned_cols.append(col)
 
         df.columns = cleaned_cols
+    
+    df = df.apply(pd.to_numeric, errors="ignore")
 
     return df
 
@@ -163,24 +165,36 @@ def rename_columns_to_sample(
 
 
 
-def make_long_df(proteome: pd.DataFrame, meta: pd.DataFrame, merge_on: str = "sample_name", proteome_index = None):
+def make_long_df(
+    proteome: pd.DataFrame,
+    meta: pd.DataFrame,
+    merge_on: str = "sample_name",
+    proteome_index: str = "Protein.Group"
+):
     """
-    Create a long-format proteome dataframe by merging metadata and proteome data
+    Create a long-format proteome dataframe by merging metadata and proteome data.
 
     proteome : wide-format proteome matrix 
     meta : metadata dataframe
-    merge_on : metadata column to merge on, default "sample_name"
-
+    merge_on : metadata column to merge on (default "sample_name")
+    proteome_index : column in proteome that identifies proteins (default "Protein.Group")
     """
-    if proteome_index is None:
-        proteome_index = [proteome.columns[0]]
-        
-    pg_long = proteome.melt(id_vars=proteome_index, var_name=merge_on, value_name="LFQ")
+    # melt proteome to long format
+    pg_long = proteome.melt(
+        id_vars=proteome_index,
+        var_name=merge_on,
+        value_name="LFQ"
+    )
     pg_long = pg_long.dropna(subset=["LFQ"])
 
+    # merge with metadata
     pg_long = pd.merge(meta, pg_long, on=merge_on)
 
+    # rename protein index column
+    pg_long = pg_long.rename(columns={proteome_index: "protein"})
+
     return pg_long
+
 
 
 
@@ -203,7 +217,7 @@ def extract_counts(df: pd.DataFrame):
 
 
 
-def plot_protein_counts(df, save_img=False, save_path="protein_counts.png"):
+def plot_protein_counts(proteome, meta, proteome_index: str = "Protein.Group", save_img=False, save_path="protein_counts.png"):
     """
     Count proteins per sample and plot a bar chart
 
@@ -211,7 +225,8 @@ def plot_protein_counts(df, save_img=False, save_path="protein_counts.png"):
     save_img : if True, save the figure to `save_path`
     save_path : path to save the figure (.html always works; .png/.svg need kaleido)
     """
-    count_df = extract_counts(df)
+    long_df = make_long_df(proteome, meta, proteome_index = proteome_index)
+    count_df = extract_counts(long_df)
 
     fig = px.bar(
         count_df,
@@ -236,7 +251,7 @@ def plot_protein_counts(df, save_img=False, save_path="protein_counts.png"):
 
 
 
-def protein_count_histogram(df, save_img=False, save_path="protein_hist.html"):
+def protein_count_histogram(proteome, meta, proteome_index = "Protein.Group", save_img=False, save_path="protein_hist.html"):
     """
     Plot histogram of protein counts per sample with boxplot margins.
 
@@ -244,7 +259,8 @@ def protein_count_histogram(df, save_img=False, save_path="protein_hist.html"):
     save_img : if True, save the figure to `save_path`
     save_path : path to save the figure (.html always works; .png/.svg need kaleido)
     """
-    count_df = extract_counts(df)
+    long_df = make_long_df(proteome, meta, proteome_index = proteome_index)
+    count_df = extract_counts(long_df)
 
     fig = px.histogram(
         count_df,
@@ -273,7 +289,7 @@ def protein_count_histogram(df, save_img=False, save_path="protein_hist.html"):
 
 
 
-def protein_count_boxplot(df, save_img=False, save_path="protein_box.html"):
+def protein_count_boxplot(proteome, meta, save_img=False, save_path="protein_box.html"):
     """
     Plot boxplot of protein counts per sample type.
 
@@ -281,7 +297,8 @@ def protein_count_boxplot(df, save_img=False, save_path="protein_box.html"):
     save_img : if True, save the figure to `save_path`
     save_path : path to save the figure (.html always works; .png/.svg need kaleido)
     """
-    count_df = extract_counts(df)
+    long_df = make_long_df(proteome, meta)
+    count_df = extract_counts(long_df)
     
     fig = px.box(
         count_df,
@@ -305,9 +322,11 @@ def protein_count_boxplot(df, save_img=False, save_path="protein_box.html"):
 
 
 
-def filter_low_count_outliers(
-    df: pd.DataFrame,
+def filter_low_count_samples(
+    proteome: pd.DataFrame,
+    meta: pd.DataFrame,
     sample_level: str = "sample",
+    proteome_index = "Protein.Group",
     k: float = 1.5):
     """
     Filter proteome dataframe by excluding samples whose protein counts 
@@ -317,8 +336,10 @@ def filter_low_count_outliers(
     sample_level : level of 'sample_type' used to compute the IQR-based threshold (default "sample").
     k : multiplier for IQR in Tukey's rule, default 1.5
     """
+
+    long_df = make_long_df(proteome, meta, proteome_index = proteome_index)
     count_df = (
-        df.groupby(["sample_name", "sample_type"])
+        long_df.groupby(["sample_name", "sample_type"])
           .size().reset_index(name="proteins")
     )
 
@@ -332,8 +353,23 @@ def filter_low_count_outliers(
     lower_bound = Q1 - k * IQR
 
     exclude = count_df.loc[count_df["proteins"] <= lower_bound, "sample_name"].unique()
+        
+    if exclude.size > 0:
+        print("Excluded samples:", list(exclude))
+    else:
+        print("No samples excluded.")
 
-    return df.loc[~df["sample_name"].isin(exclude)]
+    filtered = long_df.loc[~long_df["sample_name"].isin(exclude)]
+    filtered = filtered.pivot(index = meta.columns.tolist(), columns='protein',values = 'LFQ')
+
+    filtered = filtered.apply(pd.to_numeric, errors="ignore")
+    filtered.index.name = 'Sample ID'
+    filtered.columns.name = 'protein'  
+
+    nan_pct = filtered.isna().mean(axis=1)
+    filtered = filtered.assign(nan_fraction=nan_pct).set_index("nan_fraction", append=True)
+
+    return filtered
 
 
 
@@ -402,7 +438,7 @@ def plot_dynamic_range(pg_long: pd.DataFrame, save_img: bool = False, save_path:
 
 
 
-def filter_missingness(df, feat_prevalence=.2, axis=0):
+def filter_missingness(df, feat_prevalence=.6, axis=0):
     """ 
     Helper function to filter rows or columns of a dataframe
     """
@@ -519,7 +555,7 @@ def impute_cf(
     df_work = (df_filtered.reset_index().drop([c for c in index_cols if c != "sample_name"], axis=1).set_index("sample_name"))
     
     proteomes_stack = df_work.stack().to_frame("intensity")
-    proteomes_stack.index.set_names(["Sample ID", "protein group"], inplace=True)
+    proteomes_stack.index.set_names(["Sample ID", "protein"], inplace=True)
 
     splits, _, _, _ = pimmslearn.sampling.sample_mnar_mcar(
         df_long=proteomes_stack,
@@ -532,7 +568,7 @@ def impute_cf(
     cf_model = CollaborativeFilteringTransformer(
         target_column="intensity",
         sample_column="Sample ID",
-        item_column="protein group",
+        item_column="protein",
         out_folder="runs/scikit_interface",
     )
 
@@ -546,7 +582,7 @@ def impute_cf(
 
     imputed = cf_model.transform(proteomes_stack).unstack()
     imputed.index.name = "sample_name"
-    imputed.columns.name = "protein group"
+    imputed.columns.name = "protein"
 
     imputed = meta.merge(imputed, on="sample_name").set_index(index_cols)
 
@@ -605,7 +641,7 @@ def impute_vae(
 
     imputed =  model.transform(df_work.copy()).reindex_like(df_work)
     imputed.index.name = "sample_name"
-    imputed.columns.name = "protein group"
+    imputed.columns.name = "protein"
     imputed = meta.merge(imputed, on="sample_name").set_index(index_cols)
 
     return imputed
@@ -663,7 +699,7 @@ def impute_dae(
 
     imputed =  model.transform(df_work.copy()).reindex_like(df_work)
     imputed.index.name = "sample_name"
-    imputed.columns.name = "protein group"
+    imputed.columns.name = "protein"
     imputed = meta.merge(imputed, on="sample_name").set_index(index_cols)
 
     return imputed
@@ -1099,7 +1135,7 @@ def remove_hotelling_outliers(df: pd.DataFrame, var_explained: float = 0.90, alp
 
 
 
-def plot_umap(df: pd.DataFrame, color_by: str, save_img = False, save_path="UMAP.png"):
+def plot_umap(df: pd.DataFrame, color_by: str, save_img=False, save_path="UMAP.png"):
     """
     Generate an interactive UMAP plot from a proteomics dataframe.
 
@@ -1109,36 +1145,39 @@ def plot_umap(df: pd.DataFrame, color_by: str, save_img = False, save_path="UMAP
     if color_by not in df.index.names:
         raise ValueError(f"'{color_by}' not found in index levels: {df.index.names}")
 
-    df.index = df.index.set_levels(df.index.levels[df.index.names.index(color_by)].astype(str), level=color_by)
     color_labels = df.index.get_level_values(color_by)
 
     reducer = umap.UMAP(random_state=1)
     embedding = reducer.fit_transform(df.values)
 
     umap_df = pd.DataFrame(embedding, columns=["UMAP1", "UMAP2"], index=df.index)
-    umap_df[color_by] = color_labels
+
+    coerced = pd.to_numeric(color_labels, errors="coerce")
+    if coerced.notna().any() and coerced.notna().sum() == len(coerced):
+        color_arg = coerced  
+    else:
+        color_arg = color_labels.astype(str)  
+    umap_df[color_by] = color_arg
 
     fig = px.scatter(
         umap_df,
         x="UMAP1",
         y="UMAP2",
-        color=color_by,
+        color=color_arg,
         title=f"UMAP projection colored by {color_by}",
         width=600,
         height=500
     )
-    fig.update_traces(marker=dict(size=6, opacity=0.8), selector=dict(mode='markers'))
+    fig.update_traces(marker=dict(size=6, opacity=0.8), selector=dict(mode="markers"))
     fig.update_layout(margin=dict(l=20, r=20, t=40, b=20))
 
     if save_img:
         if save_path.endswith((".png", ".svg")):
-            fig.write_image(save_path)  #kaleido issue
+            fig.write_image(save_path)
         else:
             fig.write_html(save_path)
 
     fig.show()
-
-
 
 
 
@@ -1271,9 +1310,9 @@ def normalize_sample(
 
 
 
-def get_sample_order(df: pd.DataFrame) -> pd.Series:
-    plate = df.index.get_level_values("plate_nr").astype(str).str.extract(r"(\d+)")[0].astype(int)
-    pos   = df.index.get_level_values("plate_position").astype(str)
+def get_sample_order(df: pd.DataFrame, plate_nr: str, plate_pos: str) -> pd.Series:
+    plate = df.index.get_level_values(plate_nr).astype(str).str.extract(r"(\d+)")[0].astype(int)
+    pos   = df.index.get_level_values(plate_pos).astype(str)
 
     rows = pos.str.extract(r"^([A-Za-z]+)")[0]
     cols = pos.str.extract(r"(\d+)$")[0].astype(int)
