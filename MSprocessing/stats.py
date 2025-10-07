@@ -1,16 +1,15 @@
 import re
 import numpy as np
 import pandas as pd
+import warnings
 import plotly.express as px
-import MSprocessing.stats as mss
 
-from scipy.stats import norm
-from statsmodels.formula.api import mixedlm
+from scipy.stats import norm, ttest_ind, ttest_rel, permutation_test
+from statsmodels.formula.api import mixedlm, ols
 from statsmodels.stats.multitest import multipletests
 from alphastats.dataset.keys import Cols
 from alphastats.plots.volcano_plot import VolcanoPlot
 from alphastats.dataset.preprocessing import PreprocessingStateKeys as PSK
-from alphastats.statistics.statistic_utils import calculate_foldchange
 from alphastats.statistics.differential_expression_analysis import DifferentialExpressionAnalysis
 from sklearn.linear_model import LogisticRegressionCV
 from typing import Dict, List, Optional, Tuple, Union
@@ -67,7 +66,7 @@ def prep_for_paired_ttest(
 
     meta_out = pd.DataFrame({
         Cols.SAMPLE: g1 + g2,
-        variable:     [group1]*len(g1) + [group2]*len(g2),
+        variable: [group1]*len(g1) + [group2]*len(g2),
     })
     proteome_out = proteome.loc[meta_out[Cols.SAMPLE]]
     return proteome_out, meta_out
@@ -118,173 +117,207 @@ def prep_deltas(
 
 
 
+
+def ttests(proteome, meta, group_col, group1, group2, method):
+    idx1 = meta.index[meta[group_col] == group1]
+    idx2 = meta.index[meta[group_col] == group2]
+
+    X = proteome.loc[idx1].to_numpy(float)
+    Y = proteome.loc[idx2].to_numpy(float)
+    proteins = proteome.columns.to_numpy()
+
+    if method == "student_ttest":
+        _, pvals = ttest_ind(X, Y, equal_var=True, nan_policy="omit")
+    elif method == "welch_ttest":
+        _, pvals = ttest_ind(X, Y, equal_var=False, nan_policy="omit")
+    elif method == "paired":
+        _, pvals = ttest_rel(X, Y, nan_policy="omit")
+    else:
+        raise ValueError(f"Unsupported method: {method}")
+
+    log2fc = np.nanmean(X, axis=0) - np.nanmean(Y, axis=0)
+
+    return pd.DataFrame({
+        "protein": proteins,
+        "log2fc": log2fc,
+        "pval": pvals,
+        "padj": np.nan
+    })
+
+
+
+
+
+def resampling_adjust(
+    proteome: pd.DataFrame,
+    meta: pd.DataFrame,
+    group_col: str,
+    group1: str,
+    group2: str,
+    method: str,
+    adjust: str,
+    n_perm: int,
+    df: pd.DataFrame   # pass the observed results in!
+) -> np.ndarray:
+    if method == "perm_test":
+        raise ValueError("Resampling p pvalue adjustment not available for permmutation test")    
+    rng = np.random.default_rng(seed=0)
+    labels = meta[group_col].values
+    n_proteins = df.shape[0]
+    obs_pvals = df["pval"].values
+
+    perm_pvals = np.zeros((n_perm, n_proteins))
+    for i in range(n_perm):
+        perm_labels = rng.permutation(labels)
+        perm_meta = meta.copy()
+        perm_meta[group_col] = perm_labels
+        perm_df = ttests(proteome, perm_meta, group_col, group1, group2, method)
+        perm_pvals[i, :] = perm_df["pval"].values
+
+    if adjust == "perm":
+        min_p = perm_pvals.min(axis=1) 
+        padj = np.array([(np.sum(min_p <= p) + 1) / (n_perm + 1) for p in obs_pvals])
+
+    elif adjust == "stepdown_perm":
+        order = np.argsort(obs_pvals)
+        sorted_p = obs_pvals[order]
+        perm_sorted = perm_pvals[:, order]
+
+        padj_sorted = np.zeros_like(sorted_p, dtype=float)
+
+        for i, p in enumerate(sorted_p):
+            perm_min = np.min(perm_sorted[:, : i+1], axis=1)
+            padj_sorted[i] = (np.sum(perm_min <= p) + 1) / (n_perm + 1)
+
+        padj_sorted = np.maximum.accumulate(padj_sorted)
+
+        padj = np.empty_like(padj_sorted)
+        padj[order] = padj_sorted
+    else:
+        raise ValueError(f"Unsupported resampling adjustment: {adjust}")
+
+    return padj
+
+
+
+
+
 def run_dea(
     proteome: pd.DataFrame,
     meta: pd.DataFrame,
-    *,
-    method: str,                    # "ttest" | "paired-ttest" | "welch-ttest" | "sam" 
-    column: str,                    # metadata column with group labels
-    group1: Union[str, List[str]],
-    group2: Union[str, List[str]],
+    group_col: str,
+    group1: str,
+    group2: str,
     adjust: str = "fdr_bh",
-    preprocessing_info: Dict,
-    perm: int = 10,                  #SAM permutations
-    pairing: str,
-    alpha: float = 0.05,
-    min_fc: float = 1,
-    delta_col: str = None,
+    method: str = "ttest",
+    n_perm: int = 10000,
+    pairing: str = None, 
+    delta_col: str = None,    
     delta_group1: str = None,
-    delta_group2: str = None,
-):
-    meta_alpha = meta.reset_index().rename(columns={meta.index.name: Cols.SAMPLE})
-    if method not in ["ttest", "delta-ttest", "paired-ttest", "welch-ttest", "anova", "sam"]:
-        raise ValueError('Please select a valid method: "ttest", "delta-ttest", "paired-ttest" or "sam"')
+    delta_group2: str = None
+) -> pd.DataFrame:
+   
+    common = meta.index.intersection(proteome.index)
+    meta = meta.loc[common]
+    proteome = proteome.loc[common]
 
-    elif method == "paired-ttest":
-        if pairing == column:
-            raise ValueError("Data cannot be paired on variable to test")
-        proteome, meta_alpha = prep_for_paired_ttest(
-            meta_alpha, proteome, pair_col=pairing, variable=column, group1=group1, group2=group2
-        )
-
-    elif method == "delta-ttest":
-        if delta_col == column:
-            raise ValueError("Delta column cannot be the variable to test")
-        elif delta_col == pairing:
-            raise ValueError("Delta column cannot be the same as pairing column")
-        elif pairing == column:
-            raise ValueError("Data cannot be paired on variable to test")
-        proteome, meta_alpha = prep_deltas(
-            meta=meta_alpha,
+    if method == "delta":
+        proteome, meta = prep_deltas(
+            meta=meta,
             proteome=proteome,
             subject_col=pairing,
             delta_col=delta_col,
             delta_group1=delta_group1,
             delta_group2=delta_group2,
         )
-        meta_alpha[Cols.SAMPLE] = meta_alpha.index
-        method = "ttest"
+        method = "student_ttest" 
     
-    elif method == "welch-ttest" and preprocessing_info[PSK.LOG2_TRANSFORMED]:
-        proteome = 2 ** proteome 
-
-    elif method == "anova":
-        proteome = proteome.transpose()
-
-    feature_to_repr_map = {pid: pid for pid in proteome.columns}
-
-    #VolcanoPlot runs DEA internally
-    vp = VolcanoPlot(
-        mat=proteome,
-        rawinput=proteome,  
-        metadata=meta_alpha,
-        preprocessing_info=preprocessing_info,
-        feature_to_repr_map=feature_to_repr_map,
-        group1=group1,
-        group2=group2,
-        column=column,
-        method=method,
-        min_fc=min_fc,
-        alpha=alpha,
-        draw_line=True,
-        perm=perm,
-    )
-
-    df = vp.res.copy()   
-    volcano_fig = vp.plot  
-
-    if method == "sam":
-        vp._draw_fdr_line()
-        volcano_fig = vp.plot 
-        
-    volcano_fig.update_layout(
-        width=600,
-        height=500,
-        paper_bgcolor="white",
-        plot_bgcolor="white"
-    )
+    df = ttests(proteome, meta, group_col, group1, group2, method)
     
-    effect = df["log2fc"] if "log2fc" in df.columns else df.get("fc")
-    pval = (
-        df["pval"] if "pval" in df.columns
-        else df["pval_s0"] if "pval_s0" in df.columns
-        else df["pvalue"]
-    )
-    padj = df["qval"] if "qval" in df.columns else pd.Series(
-        multipletests(pval.values, method=adjust)[1], index=df.index
-    )
-
-    out = pd.DataFrame(
-        {
-            Cols.INDEX: df[Cols.INDEX],
-            "log2fc": effect,
-            "pval": pval.astype(float),
-            "padj": padj.astype(float),
-        }
-    ).sort_values("pval", ascending=True).set_index(Cols.INDEX) 
-    out.index.name = "protein"
-
-    return out, volcano_fig
+    mask = df["pval"].notna()
+    if mask.any():
+        if adjust in ["perm", "stepdown_perm"]:
+            df.loc[mask, "padj"] = resampling_adjust(
+                proteome, meta, group_col, group1, group2, method, adjust, n_perm, df
+            )
+        else:
+            df.loc[mask, "padj"] = multipletests(df.loc[mask, "pval"], method=adjust)[1]
+    
+    return df.set_index("protein").sort_values("pval")
 
 
 
 
 
-def run_mixedlm(
-    proteome: pd.DataFrame,
-    meta: pd.DataFrame,
-    *,
-    var1: dict,       # e.g. {"group": ["Kontrol", "Intervention"]}
-    var2: dict,       # e.g. {"timepoint": ["baseline", "w48"]}
-    pairing: str,     # subject ID column
-    adjust: str = "fdr_bh",
-):
-    # unpack the dicts
-    col1, (level1a, level1b) = list(var1.items())[0]
-    col2, (level2a, level2b) = list(var2.items())[0]
+def filter_results(results_df, term):
+    df = results_df[results_df["term"].str.contains(term, na=False)].copy()
+    df = df.drop(columns=["term"])
+    df = df.sort_values("pval")
+    return df.reset_index(drop=True)
 
-    meta_sub = meta[
-        meta[col1].isin([level1a, level1b]) & meta[col2].isin([level2a, level2b])
-    ].copy()
-    meta_sub[col1] = pd.Categorical(meta_sub[col1],
-                                    categories=[level1a, level1b],
-                                    ordered=True)
-    meta_sub[col2] = pd.Categorical(meta_sub[col2],
-                                    categories=[level2a, level2b],
-                                    ordered=True)
-    meta_sub[pairing] = meta_sub[pairing].astype("category")
-    expr = proteome.loc[meta_sub.index]
 
+
+
+def run_mixedlm(proteome, meta, formula, group_col=None, adjust="fdr_bh", reml=True, filter_to=None):
+    """
+    Fits MixedLM if a valid grouping structure exists; otherwise falls back to OLS.
+    The dependent variable 'y' in `formula` is replaced by each protein column.
+    """
     results = []
-    cols = ["protein", "beta", "pval"]
-    term = f"C({col1})[T.{level1b}]:C({col2})[T.{level2b}]"
+    if group_col not in meta.columns:
+        raise ValueError(f"{group_col} not in meta columns")
+    
+    # precompute group stats if group_col is given
+    if group_col is not None:
+        grp_counts = meta[group_col].value_counts()
+        has_replication = (grp_counts >= 2).sum() >= 1
+    else:
+        has_replication = False
+        print("No grouping found, defaulted to ordinary least squares")
 
-    for prot in expr.columns:
-        df = meta_sub.assign(intensity=pd.to_numeric(expr[prot].values, errors="coerce"))
-        df = df.dropna(subset=["intensity", col1, col2, pairing])
-
-        try:
-            fit = mixedlm(
-                f"intensity ~ C({col1})*C({col2})",
-                df, groups=df[pairing]
-            ).fit(reml=False)
-
-            if term in fit.params:
-                results.append(dict(zip(
-                    cols,
-                    [prot, float(fit.params[term]), float(fit.pvalues[term])]
-                )))
-        except Exception as e:
-            print(f"{prot}: {e}")
+    for protein in proteome.columns:
+        df = meta.join(proteome[[protein]]).rename(columns={protein: "y"})
+        # skip if y invalid
+        if df["y"].isna().all() or df["y"].nunique(dropna=True) <= 1:
+            results.append({"protein": protein, "term": None, "coef": np.nan, "pval": np.nan})
             continue
 
-    out_df = pd.DataFrame(results)
-    if not out_df.empty:
-        out_df["padj"] = multipletests(out_df["pval"], method=adjust)[1]
-        out_df = out_df.sort_values("pval", ascending=True).set_index("protein")
-        out_df.index.name = "protein"
+        try:
+            if group_col and has_replication:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    m = mixedlm(formula, df, groups=df[group_col], re_formula="1")
+                    fit = m.fit(reml=reml, method="lbfgs", disp=False)
+                # boundary check: if group variance ~ 0, refit OLS for stable SEs
+                gv = np.ravel(fit.cov_re)[0] if fit.cov_re.size else 0.0
+                if not np.isfinite(gv) or gv <= 1e-8:
+                    fit = ols(formula, data=df).fit()
+            else:
+                fit = ols(formula, data=df).fit()
 
-    return out_df
+            for term, coef, pval in zip(fit.params.index, fit.params.values, fit.pvalues.values):
+                results.append({"protein": protein, "term": term, "coef": coef, "pval": pval})
+
+        except Exception:
+            # record failure for this protein
+            results.append({"protein": protein, "term": None, "coef": np.nan, "pval": np.nan})
+
+    out = pd.DataFrame(results)
+
+    if "term" in out.columns:
+        out["padj"] = np.nan
+        for term, sub in out.groupby("term"):
+            mask = sub["pval"].notna()
+            if mask.any():
+                out.loc[sub.index[mask], "padj"] = multipletests(
+                    sub.loc[mask, "pval"], method=adjust
+                )[1]
+
+    if filter_to: 
+        out = filter_results(out, filter_to)
+        
+    return out.set_index("protein")
+
 
 
 
@@ -340,12 +373,83 @@ def run_logreg(
 
 
 
+
+
+
+
+def volcano_plot(results, min_fc=0, alpha=0.05, labels=True):
+    df = results.copy().reset_index()
+    df = df.rename(columns={"index": "protein"})
+
+    if "coef" in df.columns:
+        df["log2fc"] = df["coef"]
+
+    # avoid -inf for any exact zero p-values
+    p = df["pval"].astype(float).clip(lower=np.finfo(float).tiny)
+    df["-log10(p-value)"] = -np.log10(p)
+
+    # classify points
+    df["color"] = "non_sig"
+    df.loc[(df["log2fc"] >  min_fc) & (df["padj"] < alpha), "color"] = "up"
+    df.loc[(df["log2fc"] < -min_fc) & (df["padj"] < alpha), "color"] = "down"
+
+    color_dict = {
+        "non_sig": "#404040",
+        "up": "#B65EAF",
+        "down": "#009599",
+    }
+
+    # always create label column; fill only if labels=True
+    df["label"] = ""
+    if labels:
+        df.loc[df["color"].isin(["up", "down"]), "label"] = df["protein"]
+
+    fig = px.scatter(
+        df,
+        x="log2fc",
+        y="-log10(p-value)",
+        color="color",
+        color_discrete_map=color_dict,
+        hover_name="protein",
+        text="label",  # safe: column always exists
+        template="simple_white+alphastats_colors",
+    )
+
+    fig.update_traces(
+        textposition="top center",
+        textfont=dict(size=9)
+    )
+
+    # cutoff lines
+    ycut = -np.log10(alpha)
+    #fig.add_hline(y=ycut, line_width=1, line_dash="dash", line_color="#8c8c8c")
+    #fig.add_vline(x=min_fc,  line_width=1, line_dash="dash", line_color="#8c8c8c")
+    #fig.add_vline(x=-min_fc, line_width=1, line_dash="dash", line_color="#8c8c8c")
+
+    fig.update_layout(
+        showlegend=False,
+        width=600,
+        height=500,
+        xaxis_title="log2 Fold Change",
+        yaxis_title="-log10(p-value)",
+        paper_bgcolor="white",
+        plot_bgcolor="white",
+    )
+    return fig
+
+
+
+
+
+
+
 def go_enrichment(
     data: pd.DataFrame,
     pval_cutoff: float = 0.05,
     organism: str = "hsapiens",
     sources = ["GO:BP", "GO:MF", "GO:CC", "KEGG", "REAC"],
     restrict_background = True,
+    adjust = "g_SCS"
 ) -> pd.DataFrame:
     """
     Run functional enrichment analysis on DEA results using g:Profiler.
@@ -371,8 +475,9 @@ def go_enrichment(
         how="left"
     ).dropna(subset=["converted"])
 
-    sig_ids = data_with_genes.loc[data_with_genes["pval"] < pval_cutoff, "converted"].unique().tolist()
+    sig_ids = data_with_genes.loc[data_with_genes["padj"] < pval_cutoff, "converted"].unique().tolist()
     background_ids = data_with_genes["converted"].unique().tolist()
+    print(len(sig_ids))
     
     if restrict_background:
         results = gp.profile(
@@ -381,7 +486,8 @@ def go_enrichment(
             domain_scope="custom",
             background=background_ids,
             sources=sources,
-            all_results=True
+            all_results=True,
+            significance_threshold_method = adjust
         )
     
     else:
@@ -389,7 +495,16 @@ def go_enrichment(
             organism=organism,
             query=sig_ids,
             sources=sources,
-            all_results=True
+            all_results=True,
+            significance_threshold_method = adjust
         )
     
     return results
+
+
+
+
+
+
+
+
