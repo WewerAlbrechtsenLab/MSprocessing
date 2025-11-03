@@ -100,7 +100,7 @@ def rename_columns_to_sample(
     pd.DataFrame
         DataFrame with renamed columns.
     """
-    keep_parts = keep_parts or [-1]
+    keep_parts = keep_parts or [-2, -1]
     if not isinstance(keep_parts, list):
         raise ValueError("Argument 'keep_parts' must be a list of integer positions.")
 
@@ -143,7 +143,7 @@ def merge_meta_proteome(
     meta_id_col : str
         Column in `meta` that identifies samples.
     proteome_id_col : str
-        Column in `proteome` that identifies samples.
+        Column in `proteome` that identifies proteins.
 
     Returns
     -------
