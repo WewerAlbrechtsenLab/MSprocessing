@@ -5,24 +5,27 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "MSprocessing"
 version = "0.1.0"
-description = "Mass spec processing pipeline"
+description = "Mass spectrometry data processing pipeline"
 readme = "README.md"
 requires-python = ">=3.9"
+
 dependencies = [
-  "numpy>=1.24",
-  "pandas>=2.0",
-  "scipy>=1.10",
-  "scikit-learn>=1.2",
-  "plotly>=5.18",
-  "umap-learn>=0.5.4",
-  "combat>=0.3.3",
-  "pimms-learn>=0.5.0",
-  "fastai>=2.7",
-  "notebook",
-  "ipykernel",
-  "matplotlib>=3.7",
-  "seaborn>=0.12",
-  "kaleido>=0.2.1"
+    "numpy>=2.2.6",
+    "pandas>=2.3.1",
+    "scipy>=1.15.3",
+    "statsmodels>=0.14.5",
+    "scikit-learn>=1.7.1",
+    "torch>=2.8.0",
+    "matplotlib>=3.10.5",
+    "plotly>=6.3.0",
+    "matplotlib-venn>=1.1.2",
+    "umap-learn>=0.5.9",
+    "pimms-learn>=0.5.0",
+    "combat>=0.3.3",
+    "mygene>=3.2.2",
+    "gprofiler-official>=1.0.0",
+    "fastai>=2.8.4",
+    "inmoose==0.8.1"
 ]
 
 [tool.setuptools.packages.find]
