@@ -25,7 +25,6 @@ dependencies = [
     "mygene>=3.2.2",
     "gprofiler-official>=1.0.0",
     "fastai>=2.8.4",
-    "inmoose==0.8.1"
 ]
 
 [tool.setuptools.packages.find]
