@@ -218,7 +218,12 @@ def impute_vae(
         .drop([c for c in index_cols if c != "sample_name"], axis=1)
         .set_index("sample_name")
     )
+    df_work.index.name = "sample_name"
+    df_work.columns.name = "protein"
+
     hidden_layers = hidden_layers or [512]
+    print(df_work.stack().index.names)
+
 
     val_X, train_X = pimmslearn.sampling.sample_data(
         df_work.stack(),
@@ -310,6 +315,9 @@ def impute_dae(
         .drop([c for c in index_cols if c != "sample_name"], axis=1)
         .set_index("sample_name")
     )
+    df_work.index.name = "sample_name"
+    df_work.columns.name = "protein"
+    
     hidden_layers = hidden_layers or [512]
 
     val_X, train_X = pimmslearn.sampling.sample_data(
