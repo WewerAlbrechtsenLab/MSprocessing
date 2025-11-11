@@ -151,17 +151,16 @@ def merge_meta_proteome(
         Merged DataFrame indexed by metadata columns.
     """
     proteome = proteome.set_index(proteome_id_col)
-    proteome_t = proteome.T
+    valid_samples = proteome.columns.intersection(meta[meta_id_col])
+
+    meta = meta[meta[meta_id_col].isin(valid_samples)]
+
+    proteome_t = proteome[valid_samples].T
     proteome_t.index.name = meta_id_col
     proteome_t.reset_index(inplace=True)
 
-    meta = meta.rename(columns={meta_id_col: "sample_name"})
-    proteome_t = proteome_t.rename(columns={meta_id_col: "sample_name"})
-
-    merged = pd.merge(meta, proteome_t, on="sample_name", how="inner")
-
-    index_cols = meta.columns.tolist()
-    merged = merged.set_index(index_cols)
+    merged = pd.merge(meta, proteome_t, on=meta_id_col, how="inner")
+    merged = merged.set_index(meta.columns.tolist())
 
     return merged
 

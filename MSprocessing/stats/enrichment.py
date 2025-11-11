@@ -70,21 +70,22 @@ def go_enrichment(
     data: pd.DataFrame,
     pval_cutoff: float = 0.05,
     organism: str = "hsapiens",
-    sources = ["GO:BP", "GO:MF", "GO:CC", "KEGG", "REAC"],
-    restrict_background = True,
-    adjust = "g_SCS"
+    sources=["GO:BP", "GO:MF", "GO:CC", "KEGG", "REAC"],
+    restrict_background=True,
+    adjust="g_SCS"
 ) -> pd.DataFrame:
     """
-    Perform functional enrichment analysis using g:Profiler.
+    Perform functional enrichment analysis on up- and down-regulated proteins separately.
 
-    This function identifies enriched biological processes, molecular functions,
-    cellular components, and pathway terms among significantly changed proteins.
+    This function splits the input data by log2 fold-change direction, identifies
+    enriched biological processes, molecular functions, cellular components, and
+    pathway terms for each direction independently, then combines results.
 
     Parameters
     ----------
     data : pd.DataFrame
         Differential expression results indexed by UniProt IDs.
-        Must contain a "padj" column for adjusted p-values.
+        Must contain "padj" and "log2fc" columns.
     pval_cutoff : float, default=0.05
         Adjusted p-value threshold defining significantly changed proteins.
     organism : str, default="hsapiens"
@@ -100,45 +101,75 @@ def go_enrichment(
     Returns
     -------
     pd.DataFrame
-        Enrichment results as returned by g:Profiler, including term IDs,
-        names, sources, p-values, and enrichment statistics.
+        Combined enrichment results for up- and down-regulated proteins, including
+        columns: source, name, p_value, description, term_size, query_size,
+        intersection_size, direction. Filtered to significant results only and
+        sorted by p_value.
     """
     gp = GProfiler(return_dataframe=True)
-    all_ids = data.index.str.split(";").str[0].dropna().unique().tolist()
-
-    conversion = gp.convert(organism=organism, query=all_ids)
-    conversion = conversion.dropna(subset=["converted"]).drop_duplicates("incoming")
-
-    data_with_genes = data.copy()
-    data_with_genes["UniProt_ID"] = data_with_genes.index.str.split(";").str[0]
-    data_with_genes = data_with_genes.merge(
-        conversion[["incoming", "converted", "name"]],
-        left_on="UniProt_ID",
-        right_on="incoming",
-        how="left"
-    ).dropna(subset=["converted"])
-
-    sig_ids = data_with_genes.loc[data_with_genes["padj"] < pval_cutoff, "converted"].unique().tolist()
-    background_ids = data_with_genes["converted"].unique().tolist()
     
-    if restrict_background:
-        results = gp.profile(
-            organism=organism,
-            query=sig_ids,
-            domain_scope="custom",
-            background=background_ids,
-            sources=sources,
-            all_results=True,
-            significance_threshold_method = adjust
-        )
+    data_up = data[data["log2fc"] > 0].copy()
+    data_down = data[data["log2fc"] < 0].copy()
     
+    results_list = []
+    
+    for direction, direction_data in [("up", data_up), ("down", data_down)]:
+        if direction_data.empty:
+            continue
+        
+        all_ids = direction_data.index.str.split(";").str[0].dropna().unique().tolist()
+        
+        conversion = gp.convert(organism=organism, query=all_ids)
+        conversion = conversion.dropna(subset=["converted"]).drop_duplicates("incoming")
+        
+        data_with_genes = direction_data.copy()
+        data_with_genes["UniProt_ID"] = data_with_genes.index.str.split(";").str[0]
+        data_with_genes = data_with_genes.merge(
+            conversion[["incoming", "converted", "name"]],
+            left_on="UniProt_ID",
+            right_on="incoming",
+            how="left"
+        ).dropna(subset=["converted"])
+        
+        sig_ids = data_with_genes.loc[data_with_genes["padj"] < pval_cutoff, "converted"].unique().tolist()
+        background_ids = data_with_genes["converted"].unique().tolist()
+        
+        if not sig_ids:
+            continue
+        
+        if restrict_background:
+            results = gp.profile(
+                organism=organism,
+                query=sig_ids,
+                domain_scope="custom",
+                background=background_ids,
+                sources=sources,
+                all_results=True,
+                significance_threshold_method=adjust
+            )
+        else:
+            results = gp.profile(
+                organism=organism,
+                query=sig_ids,
+                sources=sources,
+                all_results=True,
+                significance_threshold_method=adjust
+            )
+        
+        if not results.empty:
+            results_filtered = results[results["significant"]].copy()
+            results_filtered = results_filtered[
+                ["source", "name", "p_value", "description", "term_size", "query_size", "intersection_size"]
+            ]
+            results_filtered["direction"] = direction
+            results_list.append(results_filtered)
+    
+    if results_list:
+        combined = pd.concat(results_list, ignore_index=True)
+        combined = combined.sort_values("p_value").reset_index(drop=True)
+        return combined
     else:
-        results = gp.profile(
-            organism=organism,
-            query=sig_ids,
-            sources=sources,
-            all_results=True,
-            significance_threshold_method = adjust
-        )
-    
-    return results
+        return pd.DataFrame(columns=[
+            "source", "name", "p_value", "description", "term_size", 
+            "query_size", "intersection_size", "direction"
+        ])
