@@ -2,35 +2,57 @@ import pandas as pd
 
 
 def extract_counts(
-    df: pd.DataFrame,
-    sample_type_level: str = "sample_type"
+    df: pd.DataFrame, 
+    sample_name_col: str = "sample_name",
+    group: str | None = None
 ) -> pd.DataFrame:
     """
-    Count the number of detected proteins per sample and attach sample type.
+    Count the number of detected proteins per sample and attach grouping info.
 
     Parameters
     ----------
     df : pd.DataFrame
         Wide-format DataFrame with samples as rows (MultiIndex: metadata)
         and proteins as columns.
-    sample_type_level : str, default="sample_type"
-        Name of the index level corresponding to the sample type.
+    sample_name_col : str, default="sample_name"
+        Name of the index level corresponding to the sample identifier.
+    group : str, optional
+        Name of the index level or column to use for grouping.
+        If None, no grouping variable is added.
 
     Returns
     -------
     pd.DataFrame
         DataFrame with columns:
             - "sample_name": sample identifier
-            - "sample_type": sample type category
             - "proteins": number of detected (non-missing) proteins
+            - <group>: grouping variable (optional)
     """
     protein_counts = df.notna().sum(axis=1)
-
     count_df = protein_counts.to_frame("proteins")
-    count_df["sample_name"] = df.index.get_level_values("sample_name")
-    count_df["sample_type"] = df.index.get_level_values(sample_type_level)
+
+    # Always include sample name
+    if sample_name_col in df.index.names:
+        count_df["sample_name"] = df.index.get_level_values(sample_name_col)
+    else:
+        # Flatten MultiIndex and make sure it's a list of strings
+        count_df["sample_name"] = [
+            "_".join(map(str, idx)) if isinstance(idx, tuple) else str(idx)
+            for idx in df.index.to_flat_index()
+        ]
+
+    # Include group if provided
+    if group is not None:
+        if group in df.index.names:
+            count_df[group] = df.index.get_level_values(group)
+        elif group in df.columns:
+            count_df[group] = df[group].values
+        else:
+            raise KeyError(f"Grouping variable '{group}' not found in index or columns.")
 
     return count_df.reset_index(drop=True)
+
+
 
 
 
@@ -56,11 +78,12 @@ def filter_samples_by_missingness(
         Filtered DataFrame with samples exceeding the missingness threshold removed.
         Includes an additional index level named 'nan_fraction'.
     """
+
     non_nan_fraction = df.notna().mean(axis=1)
-    
     Q1 = non_nan_fraction.quantile(0.25)
     Q3 = non_nan_fraction.quantile(0.75)
     IQR = Q3 - Q1
+
     lower_bound = Q1 - k * IQR
     exclude = non_nan_fraction[non_nan_fraction < lower_bound]
 
@@ -74,6 +97,7 @@ def filter_samples_by_missingness(
             print(f"  {sample_name}: non_nan_fraction = {val:.3f}")
     else:
         print("No samples excluded.")
+
 
     df = df.assign(non_nan_fraction=non_nan_fraction)
     df = df.set_index("non_nan_fraction", append=True)

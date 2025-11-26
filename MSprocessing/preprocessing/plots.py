@@ -8,9 +8,13 @@ from MSprocessing.preprocessing.missingness import extract_counts
 
 
 
+import plotly.express as px
+import plotly.graph_objects as go
+
 def plot_count_histogram(
     df: pd.DataFrame,
-    sample_type_level: str = "sample_type"
+    group: str | None = None,
+    ymax: float | None = None
 ) -> go.Figure:
     """
     Plot the number of detected proteins per sample as a bar chart.
@@ -19,37 +23,57 @@ def plot_count_histogram(
     ----------
     df : pd.DataFrame
         Wide-format DataFrame with samples as rows and proteins as columns.
-    sample_type_level : str, default="sample_type"
-        Index level used to color the bars by sample type.
+    group : str, optional
+        Name of the index level or column used to color the bars by group.
+        If None, all bars are the same color.
+    ymax : float, optional
+        Optional upper limit for the y-axis. If None, auto-scaling is used.
 
     Returns
     -------
     go.Figure
         Plotly bar chart figure.
     """
-    count_df = extract_counts(df, sample_type_level).sort_values("proteins", ascending=False)
+    # Extract counts
+    count_df = extract_counts(df, group=group).sort_values("proteins", ascending=False)
 
+    # Set plot width
+    width = 1000
+
+    # Color by group if available
+    color_arg = group if group and group in count_df.columns else None
+
+    # Create bar plot
     fig = px.bar(
         count_df,
         x="sample_name",
         y="proteins",
-        color="sample_type",
+        color=color_arg,
         template="simple_white",
         hover_name="sample_name",
-        width=1000,
+        width=width,
         height=500
     )
+
     fig.update_xaxes(showticklabels=False)
+
+    # Apply custom y-axis range if provided
+    if ymax is not None:
+        fig.update_yaxes(range=[0, ymax])
+
+    fig.update_layout(
+        title="Detected proteins per sample",
+        xaxis_title=None,
+        yaxis_title="Number of proteins",
+        bargap=0.15,
+    )
 
     return fig
 
 
 
 
-def plot_protein_counts(
-    df: pd.DataFrame,
-    sample_type_level: str = "sample_type"
-) -> go.Figure:
+def plot_protein_counts(df: pd.DataFrame, group: str | None = None) -> go.Figure:
     """
     Plot a histogram of protein counts per sample with boxplot margins.
 
@@ -57,27 +81,29 @@ def plot_protein_counts(
     ----------
     df : pd.DataFrame
         Wide-format DataFrame with samples as rows and proteins as columns.
-    sample_type_level : str, default="sample_type"
-        Index level used for faceting and coloring.
+    group : str, optional
+        Column or index level used for faceting and coloring. If None, no faceting.
 
     Returns
     -------
     go.Figure
         Plotly histogram with marginal boxplots.
     """
-    count_df = extract_counts(df, sample_type_level)
+    count_df = extract_counts(df, group)
+    n_groups = len(count_df[group].unique()) if group and group in count_df.columns else 1
+    width = 600 + 400 * (n_groups - 1)
 
     fig = px.histogram(
         count_df,
         x="proteins",
-        color="sample_type",
+        color=group if group else None,
         marginal="box",
         hover_data=count_df.columns,
-        facet_col="sample_type",
-        facet_col_wrap=1,
+        facet_col=group if group else None,
+        facet_col_wrap=1 if group else None,
         template="simple_white",
-        width=1000,
-        height=500
+        width=width,
+        height=500,
     )
     fig.update_layout(bargap=0.1)
     fig.update_xaxes(range=[0, count_df["proteins"].max()])
