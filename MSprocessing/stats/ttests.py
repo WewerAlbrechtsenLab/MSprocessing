@@ -222,6 +222,55 @@ def ttests(
 
 
 
+
+def perm_meta_paired(meta, pair_col, group_col, group1, group2, rng):
+    """
+    Create a paired-design permutation by randomly regrouping samples
+    into new pairs and assigning one sample per pair to each group.
+
+    Parameters
+    ----------
+    meta : pd.DataFrame
+        Metadata with grouping information.
+    pair_col : str
+        Parameter for paired or delta designs.
+    group_col : str
+        Column defining experimental groups.
+    group1, group2 : str
+        Group labels to assign.
+    rng : numpy.random.Generator
+        Random number generator.
+
+    Returns
+    -------
+    pd.DataFrame
+        Permuted metadata with new pairs and reassigned groups.
+    """
+    m = meta.copy()
+    valid = m.groupby(pair_col).filter(lambda x: len(x) == 2).index.tolist()
+
+    shuffled_idx = rng.permutation(valid)
+    new_pairs = [shuffled_idx[i:i+2] for i in range(0, len(shuffled_idx), 2)]
+
+    # assign new synthetic subject IDs
+    for new_subj_id, pair_rows in enumerate(new_pairs, start=1):
+        for row in pair_rows:
+            m.at[row, pair_col] = f"perm_subj_{new_subj_id}"
+
+        if len(pair_rows) == 2:
+            if rng.random() < 0.5:
+                m.at[pair_rows[0], group_col] = group1
+                m.at[pair_rows[1], group_col] = group2
+            else:
+                m.at[pair_rows[0], group_col] = group2
+                m.at[pair_rows[1], group_col] = group1
+
+    return m
+
+
+
+
+
 def resampling_adjust(
     proteome: pd.DataFrame,
     meta: pd.DataFrame,
@@ -274,10 +323,23 @@ def resampling_adjust(
     obs_pvals = df["pval"].values
 
     perm_pvals = np.zeros((n_perm, n_proteins))
+
     for i in range(n_perm):
-        perm_labels = rng.permutation(labels)
-        perm_meta = meta.copy()
-        perm_meta[group_col] = perm_labels
+        
+        if method == "paired":
+            perm_meta = perm_meta_paired(
+                meta=meta,
+                pair_col=pair_col,
+                group_col=group_col,
+                group1=group1,
+                group2=group2,
+                rng=rng
+            )
+
+        else:
+            perm_meta = meta.copy()
+            perm_meta[group_col] = rng.permutation(meta[group_col].values)
+
         try:
             perm_df = ttests(
                 proteome=proteome,
@@ -411,3 +473,10 @@ def run_dea(
             df.loc[mask, "padj"] = multipletests(df.loc[mask, "pval"], method=adjust)[1]
 
     return df.set_index("protein").sort_values("pval")
+
+
+
+
+
+
+
