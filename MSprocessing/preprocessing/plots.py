@@ -374,7 +374,10 @@ def plot_sample_box(df):
         raise ValueError("'sample_order' must be one of the index levels.")
 
     df_sorted = df.reset_index().sort_values("sample_order")
-    protein_cols = df.columns[df.columns.str.startswith("A") | df.columns.str.startswith("Q")]
+    protein_cols = (
+        df.select_dtypes(include=[np.number])
+        .columns.difference(df.index.names)
+    )
     sample_names = df_sorted["sample_order"].astype(int).tolist()
     df_sorted = df_sorted.set_index("sample_order")
     

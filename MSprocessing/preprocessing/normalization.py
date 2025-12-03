@@ -1,33 +1,5 @@
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
-from combat.pycombat import pycombat
-
-
-
-
-def batch_correction(
-    df: pd.DataFrame,
-    batch_column: str = "plate_nr"
-) -> pd.DataFrame:
-    """
-    Perform batch correction using the `pycombat` algorithm.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Wide-format DataFrame of imputed proteomic intensities.
-        Rows represent samples (with MultiIndex metadata) and
-        columns represent protein features.
-
-    Returns
-    -------
-    pd.DataFrame
-        Batch-corrected DataFrame with the same shape and indices as input.
-    """
-    batch_labels = df.reset_index()[batch_column].tolist()
-    proteomes_combat = pycombat(df.T, batch_labels).T
-    return proteomes_combat
 
 
 
@@ -83,21 +55,28 @@ def normalize_sample(
     pd.DataFrame
         Normalized DataFrame with the same index and columns as input.
     """
+    value_cols = df.select_dtypes(include=[np.number]).columns.difference(df.index.names)
+
     if method not in {"mean", "median", "cscore"}:
         raise ValueError("method must be one of: 'mean', 'median', 'cscore'")
 
-    if method in {"mean", "median"}:
-        if method == "mean":
-            center_values = df.mean(axis=1)
-            global_center = center_values.mean()
-        else:
-            center_values = df.median(axis=1)
-            global_center = center_values.median()
+    df_norm = df.copy()
 
-        # Normalize each sample to global center
-        df_norm = df.div(center_values, axis=0).mul(global_center)
+    vals = df[value_cols]
+
+    if method == "mean":
+        row_means = vals.mean(axis=1)
+        target = row_means.mean()
+        factors = target / row_means
+        df_norm[value_cols] = vals.mul(factors, axis=0)
+
+    elif method == "median":
+        row_meds = vals.median(axis=1)
+        target = row_meds.median()
+        factors = target / row_meds
+        df_norm[value_cols] = vals.mul(factors, axis=0)
 
     elif method == "cscore":
-        df_norm = df.apply(robust_zscore, axis=1, result_type="broadcast")
+        df_norm[value_cols] = vals.apply(robust_zscore, axis=1, result_type="broadcast")
 
     return df_norm.round(round_digits)
