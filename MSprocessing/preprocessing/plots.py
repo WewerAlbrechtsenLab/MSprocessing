@@ -254,7 +254,7 @@ def plot_sample_violins(
         points=False,
         template="simple_white",
         title=f"Per-sample intensity distributions (|z| > {z_thresh} flagged)",
-        width=600,
+        width=1200,
         height=500
     )
     fig.update_xaxes(showticklabels=False)
@@ -358,7 +358,7 @@ def plot_sample_means(
 
 def plot_sample_box(df):
     """
-    Plot box plot of intensities per sample with overall mean and trend line.
+    Plot box plot of intensities per sample with overall median line.
 
     Parameters
     ----------
@@ -368,7 +368,7 @@ def plot_sample_box(df):
     Returns
     -------
     go.Figure
-        Scatter plot of mean intensities.
+        Box plot of protein intensities with per-sample boxes.
     """
     if "sample_name" not in df.index.names:
         raise ValueError("'sample_order' must be one of the index levels.")
@@ -388,7 +388,13 @@ def plot_sample_box(df):
         values = df_sorted.loc[sample, protein_cols]
         if isinstance(values, pd.Series):
             values = values.to_frame().T
-        flat_values = values.to_numpy().flatten()
+        flat_values = values.to_numpy().ravel()
+
+        # median for this specific box
+        median_val = float(np.nanmedian(flat_values))
+        medians.append(median_val)
+
+        # box trace
         fig.add_trace(go.Box(
             y=flat_values,
             x=[i] * len(flat_values),
@@ -399,38 +405,28 @@ def plot_sample_box(df):
             hovertext=[sample] * len(flat_values),
             hoverinfo="text+y"
         ))
-        medians.append(np.nanmedian(flat_values))
+
+        # thicker median bar for THIS box
+        fig.add_trace(go.Scatter(
+            x=[i - 0.25, i + 0.25],
+            y=[median_val, median_val],
+            mode="lines",
+            line=dict(color="blue", width=3),
+            hoverinfo="skip",
+            showlegend=False
+        ))
 
     medians = np.array(medians)
     overall_median = float(np.nanmedian(medians))
 
+    # overall median line across all samples
     fig.add_trace(go.Scatter(
         x=[-0.5, len(sample_names) - 0.5],
         y=[overall_median, overall_median],
         mode="lines",
         name=f"overall median = {overall_median:.3g}",
-        line=dict(dash="solid", width=2, color="red"),
+        line=dict(dash="solid", width=2, color="gray"),
     ))
-
-    trend_df = pd.DataFrame({
-        "sample_order": np.arange(len(medians)),
-        "median": medians
-    })
-
-    try:
-        trend_fig = px.scatter(trend_df, x="sample_order", y="median", trendline="lowess")
-        trendline = trend_fig.data[1]
-        trendline.name = "trend (median)"
-        fig.add_trace(trendline)
-    except Exception:
-        roll = pd.Series(medians).rolling(9, center=True, min_periods=1).median()
-        fig.add_trace(go.Scatter(
-            x=trend_df["sample_order"],
-            y=roll,
-            mode="lines",
-            name="trend (median)",
-            line=dict(color="blue")
-        ))
 
     fig.update_layout(
         title="Protein intensity distribution per sample",
@@ -441,13 +437,14 @@ def plot_sample_box(df):
         ),
         yaxis_title="protein intensity",
         template="simple_white",
-        width=1000,
+        width=1200,
         height=500,
         showlegend=False,
         margin=dict(l=10, r=10, t=40, b=80),
     )
 
     fig.show()
+
 
 
 
