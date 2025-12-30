@@ -72,6 +72,7 @@ def go_enrichment(
     organism: str = "hsapiens",
     sources=["GO:BP", "GO:MF", "GO:CC", "KEGG", "REAC"],
     restrict_background=True,
+    convert_id=True,
     adjust="g_SCS"
 ) -> pd.DataFrame:
     """
@@ -97,6 +98,8 @@ def go_enrichment(
         If False, uses the default g:Profiler organism-wide background.
     adjust : str, default="g_SCS"
         Multiple-testing correction method used by g:Profiler.
+    convert_id : bool, default=True
+        If True, converts UniProt IDs to gene symbols using g:Profiler before analysis.
 
     Returns
     -------
@@ -107,32 +110,43 @@ def go_enrichment(
         sorted by p_value.
     """
     gp = GProfiler(return_dataframe=True)
+
+    if "log2fc" in data.columns:
+        fc_col = "log2fc"
+    elif "coef" in data.columns:
+        fc_col = "coef"
+    else:
+        raise ValueError("Input data must contain either 'log2fc' or 'coef' column.")
     
-    data_up = data[data["log2fc"] > 0].copy()
-    data_down = data[data["log2fc"] < 0].copy()
-    
-    results_list = []
-    
-    for direction, direction_data in [("up", data_up), ("down", data_down)]:
-        if direction_data.empty:
-            continue
-        
-        all_ids = direction_data.index.str.split(";").str[0].dropna().unique().tolist()
-        
+    data = data.copy()
+    data["UniProt_ID"] = data.index.str.split(";").str[0]
+
+    if convert_id:
+        all_ids = data["UniProt_ID"].dropna().unique().tolist()
         conversion = gp.convert(organism=organism, query=all_ids)
         conversion = conversion.dropna(subset=["converted"]).drop_duplicates("incoming")
-        
-        data_with_genes = direction_data.copy()
-        data_with_genes["UniProt_ID"] = data_with_genes.index.str.split(";").str[0]
-        data_with_genes = data_with_genes.merge(
+        data = data.merge(
             conversion[["incoming", "converted", "name"]],
             left_on="UniProt_ID",
             right_on="incoming",
             how="left"
         ).dropna(subset=["converted"])
-        
-        sig_ids = data_with_genes.loc[data_with_genes["padj"] < pval_cutoff, "converted"].unique().tolist()
-        background_ids = data_with_genes["converted"].unique().tolist()
+    else:
+        data["converted"] = data["UniProt_ID"]
+
+    sig_data = data[data["padj"] < pval_cutoff].copy()
+    background_ids = data["converted"].unique().tolist()
+
+    data_up = sig_data[sig_data[fc_col] > 0].copy()
+    data_down = sig_data[sig_data[fc_col] < 0].copy()
+
+    results_list = []
+
+    for direction, direction_data in [("up", data_up), ("down", data_down)]:
+        if direction_data.empty:
+            continue
+
+        sig_ids = direction_data["converted"].unique().tolist()
         
         if not sig_ids:
             continue
@@ -169,7 +183,4 @@ def go_enrichment(
         combined = combined.sort_values("p_value").reset_index(drop=True)
         return combined
     else:
-        return pd.DataFrame(columns=[
-            "source", "name", "p_value", "description", "term_size", 
-            "query_size", "intersection_size", "direction"
-        ])
+        print("No significant enrichment found.")
