@@ -37,6 +37,52 @@ def split_data(
     return mat, meta
 
 
+
+def convert_ids_from_mapping(
+    df: pd.DataFrame,
+    mapping_file: str,
+    from_col: str,
+    to_col: str,
+    axis: int = 1,
+    sep: str = "\t",
+) -> pd.DataFrame:
+    """
+    Replace row or column identifiers using a two-column mapping file.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame, DiaNN output.
+    mapping_file : str
+        Path to mapping file.
+    from_col : str
+        Column name in the mapping file containing the current identifiers.
+    to_col : str
+        Column name in the mapping file containing the replacement identifiers.
+    axis : int, default=1
+        1 = replace column names, 0 = replace row names.
+    sep : str, default="\\t"
+        Field separator for the mapping file.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with renamed rows or columns.
+    """
+
+    map_genes = pd.read_csv(
+        mapping_file,
+        sep=sep,
+        usecols=[from_col, to_col],
+    )
+    map_genes = dict(zip(map_genes["Protein.Group"], map_genes["Genes"]))
+
+    if axis == 1:
+        return df.rename(columns=map_genes)
+    else:
+        return df.rename(index=map_genes)
+
+
 def within_group_corr(
     proteome: pd.DataFrame,
     meta: pd.DataFrame,
