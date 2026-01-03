@@ -171,7 +171,13 @@ def plot_venn(dfs, names, alpha=0.05):
 
 
 def plot_heatmap(
-    proteome, meta, group_by=None, method="average", metric="correlation"
+    proteome, 
+    meta, 
+    group_by=None, 
+    method="average", 
+    metric="correlation",
+    height=800, 
+    width=800
 ):
     """
     Generate an interactive clustered sample–sample correlation heatmap.
@@ -200,157 +206,185 @@ def plot_heatmap(
         index=proteome.index,
         columns=proteome.columns,
     )
-    corr = proteome_z.T.corr()
 
-    dist = pdist(proteome_z, metric=metric)
-    linkage_mat = linkage(dist, method=method)
-    order = leaves_list(linkage_mat)
-    corr_ordered = corr.iloc[order, order]
-    meta_ordered = meta.iloc[order]
-    
+    linkage_s = linkage(pdist(proteome_z, metric=metric), method=method)
+    linkage_p = linkage(pdist(proteome_z.T, metric=metric), method=method)
+
+    order_s = leaves_list(linkage_s)
+    order_p = leaves_list(linkage_p)
+
+    data_ordered = proteome_z.iloc[order_s, order_p]
+    meta_ordered = meta.iloc[order_s]
+    proteins_ordered = proteome_z.columns[order_p]
+    samples_ordered = proteome_z.index[order_s]
+
+    n_samples, n_proteins = data_ordered.shape
+
     if group_by is None:
-        group_labels = pd.Series("All", index=proteome.index)
+        group_by_list = []
+    elif isinstance(group_by, str):
+        group_by_list = [group_by]
     else:
-        if isinstance(group_by, str):
-            group_labels = meta[group_by].astype(str)
-        else:
-            group_labels = meta[group_by].astype(str).agg("_".join, axis=1)
-    group_ordered = group_labels.iloc[order]
+        group_by_list = list(group_by)
 
-    hover_text = []
-    for i, row in enumerate(corr_ordered.index):
-        hover_row = []
-        for j, col in enumerate(corr_ordered.columns):
-            hover_row.append(
-                f"Sample X: {col}<br>"
-                f"Sample Y: {row}<br>"
-                f"Group X: {group_ordered[col]}<br>"
-                f"Group Y: {group_ordered[row]}<br>"
-                f"Correlation: {corr_ordered.iloc[i, j]:.3f}"
-            )
-        hover_text.append(hover_row)
+    n_groups = len(group_by_list)
 
-    n_groups = 0 if group_by is None else (1 if isinstance(group_by, str) else len(group_by))
+    widths = [0.2] + [0.04] * n_groups + [0.76]
     fig = make_subplots(
-        rows=1,
+        rows=2,
         cols=2 + n_groups,
-        column_widths=[0.2] + [0.04] * n_groups + [0.76 - 0.04 * (n_groups - 1) if n_groups else 0.8],
+        column_widths=widths,
+        row_heights=[0.18, 0.82],
+        vertical_spacing=0.002,
         horizontal_spacing=0.01,
+        shared_xaxes=True,
         shared_yaxes=True,
     )
 
-    dendro = dendrogram(linkage_mat, orientation="right", no_plot=True)
-    for xs, ys in zip(dendro["dcoord"], dendro["icoord"]):
-        ys_fixed = [(y - 5.0) / 10.0 for y in ys]
+    heatmap_col = 2 + n_groups
+
+    dendro_p = dendrogram(linkage_p, no_plot=True)
+    max_dp = max(max(d) for d in dendro_p["dcoord"])
+
+    for xs, ys in zip(dendro_p["icoord"], dendro_p["dcoord"]):
+        xs_fixed = [(x - 5) / 10 for x in xs]
+
+        if ys[0] == 0 and ys[1] == 0:
+            idx = int(xs_fixed[1])
+            hovertemplate = "%{text}<extra></extra>"
+            text = proteins_ordered[idx]
+        else:
+            hovertemplate = None
+            text = None
+
+        fig.add_trace(
+            go.Scatter(
+                x=xs_fixed,
+                y=ys,
+                mode="lines",
+                line=dict(color="black", width=1),
+                hovertemplate=hovertemplate,
+                text=text,
+                showlegend=False,
+            ),
+            row=1,
+            col=heatmap_col,
+        )
+
+    dendro_s = dendrogram(linkage_s, orientation="right", no_plot=True)
+    for xs, ys in zip(dendro_s["dcoord"], dendro_s["icoord"]):
+        ys_fixed = [(y - 5) / 10 for y in ys]
+
+        if xs[0] == 0 and xs[1] == 0:
+            idx = int(ys_fixed[1])
+            hovertemplate = "%{text}<extra></extra>"
+            text = samples_ordered[idx]
+        else:
+            hovertemplate = None
+            text = None
+
         fig.add_trace(
             go.Scatter(
                 x=xs,
                 y=ys_fixed,
                 mode="lines",
                 line=dict(color="black", width=1),
-                hoverinfo="skip",
+                hovertemplate=hovertemplate,
+                text=text,
+                showlegend=False,
             ),
-            row=1,
+            row=2,
             col=1,
         )
 
-    if group_by is not None:
-        if isinstance(group_by, str):
-            group_by = [group_by]
+    fig.update_yaxes(range=[0, max_dp], row=1, col=heatmap_col)
+    fig.update_xaxes(autorange="reversed", row=2, col=1)
 
-
-        x_positions = []
-        x_prev = 0
-        widths = [0.2] + [0.04] * n_groups + [0.76 - 0.04 * (n_groups - 1) if n_groups else 0.8]
-        total_width = sum(widths)
-        for w in widths:
-            x_prev += w / total_width
-            x_positions.append(x_prev)
-
-        for i, col in enumerate(group_by):
-            x_center = (x_positions[i + 1] + x_positions[i]) / 2
-            fig.add_annotation(
-                text=col,
-                xref="paper",
-                yref="paper",
-                x=x_center,
-                y=0.95,
-                textangle=-45,
-                showarrow=False,
-                font=dict(size=10),
-                xanchor="center",
-                yanchor="bottom",
-            )
-
+    if n_groups:
         palettes = qualitative.Plotly + qualitative.D3 + qualitative.Bold
-        for i, col in enumerate(group_by):
-           
+        y_idx = np.arange(n_samples)
+
+        for i, col in enumerate(group_by_list):
             vals = meta_ordered[col].astype(str)
-            unique_vals = vals.unique()
-            lut = dict(zip(unique_vals, palettes * ((len(unique_vals) // len(palettes)) + 1)))
-            colors = vals.map(lut).tolist()
+            uniq = vals.unique()
+            lut = dict(zip(uniq, palettes * ((len(uniq) // len(palettes)) + 1)))
 
             fig.add_trace(
                 go.Heatmap(
-                    z=np.arange(len(colors)).reshape(-1, 1),
+                    z=y_idx.reshape(-1, 1),
                     x=[col],
-                    y=np.linspace(0, len(colors) - 1, len(colors)),
+                    y=y_idx,
                     showscale=False,
-                    colorscale=[[j / (len(colors) - 1), c] for j, c in enumerate(colors)],
-                    hoverinfo="text",
-                    text=[f"{col}: {v}" for v in vals],
+                    colorscale=[[j / (len(vals) - 1), lut[v]] for j, v in enumerate(vals)],
+                    text=vals.to_numpy().reshape(-1, 1),
+                    hovertemplate=f"{col}: %{{text}}<extra></extra>",
+                    showlegend=False,
                 ),
-                row=1,
+                row=2,
                 col=i + 2,
             )
 
-    fig.add_trace(
-        go.Heatmap(
-            z=corr_ordered.values,
-            x=corr_ordered.columns,
-            y=np.linspace(0, len(corr_ordered) - 1, len(corr_ordered)), 
-            colorscale="RdBu_r",
-            zmin=-1,
-            zmax=1,
-            text=hover_text,
-            hoverinfo="text",
-            colorbar=dict(title="Corr.", len=0.9, thickness=12),
-        ),
-        row=1,
-        col=2 + n_groups,
+    group_text = (
+        "<br>".join([f"{g}: %{{customdata[{i + 2}]}}" for i, g in enumerate(group_by_list)])
+        if n_groups else ""
     )
 
-    fig.update_layout(
-        height=700,
-        width=950,
-        paper_bgcolor="white",
-        plot_bgcolor="white",
-        showlegend=False,
-        title="Sample–sample correlation heatmap",
-        title_x=0.5,
-        margin=dict(t=60, b=10, l=10, r=10),
-        hovermode="closest",
-        dragmode="zoom",  
+    hovertemplate = (
+        "Sample: %{customdata[0]}<br>"
+        "Protein: %{customdata[1]}<br>"
+        f"{group_text}<br>"
+        "Z: %{z:.3f}<extra></extra>"
+    )
+
+    customdata = np.empty((n_samples, n_proteins, 2 + n_groups), dtype=object)
+    customdata[:, :, 0] = samples_ordered.to_numpy()[:, None]
+    customdata[:, :, 1] = proteins_ordered.to_numpy()
+
+    for i, g in enumerate(group_by_list):
+        customdata[:, :, i + 2] = meta_ordered[g].astype(str).to_numpy()[:, None]
+
+    fig.add_trace(
+        go.Heatmap(
+            z=data_ordered.values,
+            x=np.arange(n_proteins),
+            y=np.arange(n_samples),
+            colorscale="RdBu_r",
+            zmid=0,
+            showscale=False,
+            hovertemplate=hovertemplate,
+            customdata=customdata,
+            showlegend=False,
+        ),
+        row=2,
+        col=heatmap_col,
     )
 
     fig.update_yaxes(
-        scaleanchor=f"x{2 + n_groups}",  
+        scaleanchor=f"x{heatmap_col}",
         scaleratio=1,
-        row=1,
-        col=2 + n_groups
+        row=2,
+        col=heatmap_col,
     )
 
-    for i in range(1, 2 + n_groups + 1):
-        fig.update_yaxes(matches="y", row=1, col=i)
+    for r in [1, 2]:
+        for c in range(1, heatmap_col + 1):
+            fig.update_xaxes(showticklabels=False, showgrid=False, zeroline=False, row=r, col=c)
+            fig.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, row=r, col=c)
 
-    for i in range(1, 2 + n_groups + 1):
-        fig.update_xaxes(showticklabels=False, showline=False, zeroline=False,
-                         showgrid=False, ticks='', row=1, col=i)
-        fig.update_yaxes(showticklabels=False, showline=False, zeroline=False,
-                         showgrid=False, ticks='', row=1, col=i)
-
+    fig.update_layout(
+        height=height,
+        width=width,
+        paper_bgcolor="white",
+        plot_bgcolor="white",
+        hovermode="closest",
+        dragmode="zoom",
+        margin=dict(t=40, b=10, l=10, r=10),
+        showlegend=False,
+    )
 
     return fig
+
+
 
 
 
