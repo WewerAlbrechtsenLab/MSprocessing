@@ -19,7 +19,7 @@ from sklearn.preprocessing import StandardScaler
 
 
 
-def volcano_plot(results, alpha=0.05, labels=True):
+def volcano_plot(results, alpha=0.05, labels=True, x_lim=None ):
     """
     Create an interactive volcano plot for differential expression results.
 
@@ -32,6 +32,8 @@ def volcano_plot(results, alpha=0.05, labels=True):
         Adjusted p-value significance threshold.
     labels : bool, default=True
         Whether to display labels for significant points.
+    x_lim : [xmin, xmax]
+        Define the visible range of the x-axis (log2 fold change).
 
     Returns
     -------
@@ -81,6 +83,8 @@ def volcano_plot(results, alpha=0.05, labels=True):
         textfont=dict(size=9)
     )
 
+    if x_lim is not None:
+        fig.update_xaxes(range=list(x_lim))
 
     fig.update_layout(
         showlegend=False,
