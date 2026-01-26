@@ -389,7 +389,7 @@ def plot_heatmap(
 
 
 
-def plot_significant_boxplot(meta, proteome, group_col, protein_col, normalize_by=None):
+def plot_group_boxplot(meta, proteome, group_col, protein_col, normalize_by=None):
     """
     Create an interactive boxplot of protein intensities grouped by metadata.
 
@@ -467,3 +467,6 @@ def plot_significant_boxplot(meta, proteome, group_col, protein_col, normalize_b
     )
 
     return fig
+
+
+

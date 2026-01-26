@@ -95,10 +95,11 @@ def run_linear_model(proteome, meta, formula, group_col=None, adjust="fdr_bh", r
         meta = meta[meta[group_col].isin(valid_groups)]
         proteome = proteome.loc[meta.index]
 
-    meta = meta.astype(str)
 
-    for protein in proteome.columns:
-        df = meta.join(proteome[[protein]]).rename(columns={protein: "y"})
+    for j, protein in enumerate(proteome.columns):
+        df = meta.copy()
+        df["y"] = proteome.iloc[:, j]
+
 
         if df["y"].isna().all() or df["y"].nunique(dropna=True) <= 1:
             results.append({"protein": protein, "term": None, "coef": np.nan, "pval": np.nan})
