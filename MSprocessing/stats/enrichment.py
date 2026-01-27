@@ -147,7 +147,6 @@ def go_enrichment(
             continue
 
         sig_ids = direction_data["converted"].unique().tolist()
-        
         if not sig_ids:
             continue
         
@@ -159,7 +158,8 @@ def go_enrichment(
                 background=background_ids,
                 sources=sources,
                 all_results=True,
-                significance_threshold_method=adjust
+                significance_threshold_method=adjust,
+                no_evidences=False
             )
         else:
             results = gp.profile(
@@ -167,20 +167,33 @@ def go_enrichment(
                 query=sig_ids,
                 sources=sources,
                 all_results=True,
-                significance_threshold_method=adjust
+                significance_threshold_method=adjust,
+                no_evidences=False
             )
         
-        if not results.empty:
-            results_filtered = results[results["significant"]].copy()
-            results_filtered = results_filtered[
-                ["source", "name", "p_value", "description", "term_size", "query_size", "intersection_size"]
-            ]
-            results_filtered["direction"] = direction
-            results_list.append(results_filtered)
-    
+        if results is None or results.empty:
+            continue
+
+        results_filtered = results[results["significant"]].copy()
+
+        all_ids = sorted(set().union(*results_filtered["intersections"]))
+        conv = gp.convert(organism=organism, query=all_ids)
+        conv = conv.dropna(subset=["converted", "name"]).drop_duplicates()
+        id_to_gene = conv.set_index("converted")["name"].to_dict()
+
+        results_filtered["intersection_genes"] = results_filtered["intersections"].apply(
+            lambda ids: sorted({id_to_gene[cid] for cid in ids if cid in id_to_gene})
+        )
+
+        results_filtered["direction"] = direction
+        results_filtered = results_filtered.drop(columns=["evidences", "query"], errors="ignore")
+
+        results_list.append(results_filtered)
+
+
     if results_list:
         combined = pd.concat(results_list, ignore_index=True)
         combined = combined.sort_values("p_value").reset_index(drop=True)
         return combined
-    else:
-        print("No significant enrichment found.")
+
+    print("No significant enrichment found.")
