@@ -117,7 +117,7 @@ def go_enrichment(
         fc_col = "coef"
     else:
         raise ValueError("Input data must contain either 'log2fc' or 'coef' column.")
-    
+
     data = data.copy()
     data["UniProt_ID"] = data.index.str.split(";").str[0]
 
@@ -125,6 +125,13 @@ def go_enrichment(
         all_ids = data["UniProt_ID"].dropna().unique().tolist()
         conversion = gp.convert(organism=organism, query=all_ids)
         conversion = conversion.dropna(subset=["converted"]).drop_duplicates("incoming")
+
+        id_map = conversion[["incoming", "converted"]].rename(
+            columns={"incoming": "uniprot", "converted": "ontology_id"}
+        )
+
+        uniprot_by_ontology = id_map.groupby("ontology_id")["uniprot"].apply(list).to_dict()
+
         data = data.merge(
             conversion[["incoming", "converted", "name"]],
             left_on="UniProt_ID",
@@ -133,6 +140,7 @@ def go_enrichment(
         ).dropna(subset=["converted"])
     else:
         data["converted"] = data["UniProt_ID"]
+        uniprot_by_ontology = dict(zip(data["converted"], data["converted"]))
 
     sig_data = data[data["padj"] < pval_cutoff].copy()
     background_ids = data["converted"].unique().tolist()
@@ -149,7 +157,7 @@ def go_enrichment(
         sig_ids = direction_data["converted"].unique().tolist()
         if not sig_ids:
             continue
-        
+
         if restrict_background:
             results = gp.profile(
                 organism=organism,
@@ -170,26 +178,19 @@ def go_enrichment(
                 significance_threshold_method=adjust,
                 no_evidences=False
             )
-        
+
         if results is None or results.empty:
             continue
 
         results_filtered = results[results["significant"]].copy()
-
-        all_ids = sorted(set().union(*results_filtered["intersections"]))
-        conv = gp.convert(organism=organism, query=all_ids)
-        conv = conv.dropna(subset=["converted", "name"]).drop_duplicates()
-        id_to_gene = conv.set_index("converted")["name"].to_dict()
-
-        results_filtered["intersection_genes"] = results_filtered["intersections"].apply(
-            lambda ids: sorted({id_to_gene[cid] for cid in ids if cid in id_to_gene})
-        )
-
         results_filtered["direction"] = direction
         results_filtered = results_filtered.drop(columns=["evidences", "query"], errors="ignore")
 
-        results_list.append(results_filtered)
+        results_filtered["proteins"] = results_filtered["intersections"].apply(
+            lambda ids: sorted({u for oid in ids for u in uniprot_by_ontology.get(oid, [])})
+        )
 
+        results_list.append(results_filtered)
 
     if results_list:
         combined = pd.concat(results_list, ignore_index=True)
