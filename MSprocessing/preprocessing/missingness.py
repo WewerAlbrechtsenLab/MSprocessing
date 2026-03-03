@@ -76,7 +76,7 @@ def filter_samples_by_missingness(
     -------
     pd.DataFrame
         Filtered DataFrame with samples exceeding the missingness threshold removed.
-        Includes an additional index level named 'nan_fraction'.
+        Includes an additional index level named 'protein_count'.
     """
 
     # Count non-missing proteins per sample
