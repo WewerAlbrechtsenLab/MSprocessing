@@ -124,7 +124,7 @@ def plot_count_boxplot(
     ----------
     df : pd.DataFrame
         DataFrame with samples as rows.
-    k : float, default=1.5
+    k : float, default=3
         Multiplier for Tukey’s IQR method.
 
     Returns
