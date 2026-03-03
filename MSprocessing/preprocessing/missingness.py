@@ -68,7 +68,7 @@ def filter_samples_by_missingness(
     ----------
     df : pd.DataFrame
         Wide-format DataFrame with samples as rows and features as columns.
-    k : float, default=1.5
+    k : float, default=3
         Multiplier for the interquartile range (IQR) used to define the lower bound
         of acceptable missingness.
 
