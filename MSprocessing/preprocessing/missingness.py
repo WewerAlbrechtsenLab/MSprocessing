@@ -76,16 +76,18 @@ def filter_samples_by_missingness(
     -------
     pd.DataFrame
         Filtered DataFrame with samples exceeding the missingness threshold removed.
-        Includes an additional index level named 'nan_fraction'.
+        Includes an additional index level named 'protein_count'.
     """
 
-    non_nan_fraction = df.notna().mean(axis=1)
-    Q1 = non_nan_fraction.quantile(0.25)
-    Q3 = non_nan_fraction.quantile(0.75)
+    # Count non-missing proteins per sample
+    protein_count = df.notna().sum(axis=1)
+
+    Q1 = protein_count.quantile(0.25)
+    Q3 = protein_count.quantile(0.75)
     IQR = Q3 - Q1
 
     lower_bound = Q1 - k * IQR
-    exclude = non_nan_fraction[non_nan_fraction < lower_bound]
+    exclude = protein_count[protein_count < lower_bound]
 
     if not exclude.empty:
         print(f"Excluded samples ({len(exclude)} total):")
@@ -94,16 +96,18 @@ def filter_samples_by_missingness(
                 sample_name = idx[df.index.names.index("sample_name")]
             else:
                 sample_name = idx
-            print(f"  {sample_name}: non_nan_fraction = {val:.3f}")
+            print(f"  {sample_name}: protein_count = {val:.3f}")
     else:
         print("No samples excluded.")
 
+    
+    df_filtered = df.drop(index=exclude.index)
 
-    df = df.assign(non_nan_fraction=non_nan_fraction)
-    df = df.set_index("non_nan_fraction", append=True)
-    df = df.apply(pd.to_numeric, errors="coerce")
+    protein_count_filtered = protein_count.loc[df_filtered.index]
+    df_filtered = df_filtered.assign(protein_count=protein_count_filtered)
+    df_filtered = df_filtered.set_index("protein_count", append=True)
 
-    return df.drop(index=exclude.index)
+    return df_filtered
 
 
 
