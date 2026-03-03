@@ -59,7 +59,7 @@ def extract_counts(
 
 def filter_samples_by_missingness(
     df: pd.DataFrame,
-    k: float = 3
+    k: float = 1.5
 ) -> pd.DataFrame:
     """
     Identify and remove samples with excessive missing values based on Tukey's rule.
@@ -68,7 +68,7 @@ def filter_samples_by_missingness(
     ----------
     df : pd.DataFrame
         Wide-format DataFrame with samples as rows and features as columns.
-    k : float, default=3
+    k : float, default=1.5
         Multiplier for the interquartile range (IQR) used to define the lower bound
         of acceptable missingness.
 
