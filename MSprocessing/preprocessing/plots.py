@@ -132,32 +132,32 @@ def plot_count_boxplot(
     go.Figure
         Boxplot of missingness across samples.
     """
+    protein_count = df.notna().sum(axis=1)
 
-    nan_fraction = df.isna().mean(axis=1) 
-    Q1 = nan_fraction.quantile(0.25) 
-    Q3 = nan_fraction.quantile(0.75) 
-    IQR = Q3 - Q1 
-    upper_bound = Q3 + k * IQR 
+    Q1 = protein_count.quantile(0.25)
+    Q3 = protein_count.quantile(0.75)
+    IQR = Q3 - Q1
+    lower_bound = Q1 - k * IQR 
     plot_df = pd.DataFrame({ 
-        "sample": nan_fraction.index.map(lambda x: "_".join(map(str, x))), 
-        "missingness": nan_fraction.values 
+        "sample": protein_count.index.map(lambda x: "_".join(map(str, x))), 
+        "protein_count": protein_count.values 
         }) 
     fig = px.box( 
         plot_df, 
-        y="missingness", 
+        y="protein_count", 
         points="outliers", # only show outliers 
         hover_data=["sample"], 
-        title="Per-sample missingness" 
+        title="Per-sample protein count" 
         ) 
     fig.add_hline( 
-        y=upper_bound, 
+        y=lower_bound, 
         line_dash="dash", 
         line_color="red", 
-        annotation_text=f"Upper bound ({upper_bound:.2f})", 
-        annotation_position="top left" 
+        annotation_text=f"Lower bound ({lower_bound:.2f})", 
+        annotation_position="bottom left" 
         ) 
     fig.update_layout( 
-        yaxis_title="Fraction missing", 
+        yaxis_title="Protein count", 
         width=600, 
         height=500 ) 
     return fig
