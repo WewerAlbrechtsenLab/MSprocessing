@@ -15,13 +15,23 @@ from sklearn.preprocessing import StandardScaler
 
 
 
-
-
-
-
-def volcano_plot(results, alpha=0.05, labels=True):
+def volcano_plot(
+    results,
+    alpha=0.05,
+    labels=True,
+    width=600,
+    height=500,
+    legend=False,
+    x_range=None,
+    y_range=None,
+    up_color="#B65EAF",
+    down_color="#009599",
+    **kwargs,
+):
     """
     Create an interactive volcano plot for differential expression results.
+
+    Additional keyword arguments are passed to plotly.express.scatter.
 
     Parameters
     ----------
@@ -32,12 +42,20 @@ def volcano_plot(results, alpha=0.05, labels=True):
         Adjusted p-value significance threshold.
     labels : bool, default=True
         Whether to display labels for significant points.
+    width : int, default=600
+        Figure width in pixels.
+    height : int, default=500
+        Figure height in pixels.
+    showlegend : bool, default=False
+        Whether to display the legend.
+    x_range : list | tuple | None, default=None
+        Range for x-axis, e.g. [-2, 2].
+    y_range : list | tuple | None, default=None
+        Range for y-axis, e.g. [0, 10].
 
     Returns
     -------
     plotly.graph_objects.Figure
-        Plotly scatter plot representing log2 fold change vs. -log10(p-value),
-        with significant features highlighted.
     """
     df = results.copy().reset_index()
     df = df.rename(columns={"index": "protein"})
@@ -45,53 +63,50 @@ def volcano_plot(results, alpha=0.05, labels=True):
     if "coef" in df.columns:
         df["log2fc"] = df["coef"]
 
-    # avoid -inf for any exact zero p-values
     p = df["pval"].astype(float).clip(lower=np.finfo(float).tiny)
     df["-log10(p-value)"] = -np.log10(p)
 
-    # classify points
     df["color"] = "non_sig"
-    df.loc[(df["log2fc"] >  0) & (df["padj"] < alpha), "color"] = "up"
+    df.loc[(df["log2fc"] > 0) & (df["padj"] < alpha), "color"] = "up"
     df.loc[(df["log2fc"] < 0) & (df["padj"] < alpha), "color"] = "down"
 
     color_dict = {
         "non_sig": "#404040",
-        "up": "#B65EAF",
-        "down": "#009599",
+        "up": up_color,
+        "down": down_color,
     }
 
-    # always create label column; fill only if labels=True
     df["label"] = ""
     if labels:
         df.loc[df["color"].isin(["up", "down"]), "label"] = df["protein"]
 
     fig = px.scatter(
         df,
-        x="log2fc",
+        x="coef",
         y="-log10(p-value)",
         color="color",
         color_discrete_map=color_dict,
         hover_name="protein",
-        text="label",  # safe: column always exists
+        text="label",
         template="simple_white",
+        **kwargs,
     )
 
-    fig.update_traces(
-        textposition="top center",
-        textfont=dict(size=9)
-    )
-
+    fig.update_traces(textposition="top center", textfont=dict(size=9))
+    fig.update_xaxes(showgrid=True, zeroline=False, range=x_range)
+    fig.update_yaxes(showgrid=True, zeroline=False, range=y_range)
+    fig.add_vline(x=0, line_width=1.5, line_dash="dash", line_color="#5c5c5c")
 
     fig.update_layout(
-        showlegend=False,
-        width=600,
-        height=500,
-        xaxis_title="log2 Fold Change",
+        showlegend=legend,
+        width=width,
+        height=height,
+        xaxis_title="log2(FC)",
         yaxis_title="-log10(p-value)",
         paper_bgcolor="white",
         plot_bgcolor="white",
     )
-    
+
     return fig
 
 
