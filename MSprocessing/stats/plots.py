@@ -1,14 +1,15 @@
 import warnings
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import plotly.express as px
 import plotly.graph_objects as go
 
+from matplotlib.lines import Line2D
 from matplotlib_venn import venn2, venn3
 from plotly.colors import qualitative
 from plotly.subplots import make_subplots
-from scipy.cluster.hierarchy import linkage, leaves_list, dendrogram
+from scipy.cluster.hierarchy import dendrogram, leaves_list, linkage
 from scipy.spatial.distance import pdist
 from sklearn.preprocessing import StandardScaler
 
@@ -485,3 +486,136 @@ def plot_group_boxplot(meta, proteome, group_col, protein_col, normalize_by=None
 
 
 
+def plot_cluster_coefficients(
+    df,
+    up_color="#B65EAF",
+    down_color="#009599",
+):
+    """
+    Plot clustered pathway summaries along a mean fold-change axis.
+
+    This function visualizes pathway clusters as a scatter plot where the
+    x-axis represents the mean fold-change per cluster, point size reflects
+    the number of proteins in the cluster, and point color indicates whether
+    the mean fold-change is positive or negative.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Cluster summary table containing at least "mean_coef", "n_proteins",
+        and "parent_name" columns.
+    up_color : str, default="#B65EAF"
+        Marker color used for clusters with positive mean fold-change.
+    down_color : str, default="#009599"
+        Marker color used for clusters with negative mean fold-change.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        Scatter plot figure showing pathway clusters ordered by mean fold-change.
+    """
+    d = df.copy()
+    d["coef"] = d["mean_coef"].astype(float)
+
+    d = d.sort_values("coef", ascending=False).reset_index(drop=True)
+    y = np.arange(len(d))
+    n = d["n_proteins"].to_numpy(dtype=float)
+
+    ax_width_in=6.0 
+    left_pad_in=3.2 
+    right_pad_in=4.0
+
+    min_s, max_s = 30, 260
+    nmin, nmax = float(np.nanmin(n)), float(np.nanmax(n))
+    if nmax == nmin:
+        sizes = np.full_like(n, (min_s + max_s) / 2.0, dtype=float)
+    else:
+        sizes = min_s + (n - nmin) / (nmax - nmin) * (max_s - min_s)
+
+    coef = d["coef"].to_numpy(dtype=float)
+    face = np.where(coef > 0, up_color, np.where(coef < 0, down_color, "#666666"))
+
+    fig_w = ax_width_in + left_pad_in + right_pad_in
+    fig_h = max(3, 0.35 * len(d))
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+
+    left = left_pad_in / fig_w
+    right = 1.0 - (right_pad_in / fig_w)
+    fig.subplots_adjust(left=left, right=right)
+
+    ax.scatter(
+        d["coef"], y,
+        c=face, s=sizes,
+        edgecolors="none", linewidths=0
+    )
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(d["parent_name"])
+    ax.set_xlabel("mean log2 fold change")
+    ax.set_ylim(-1, len(d))
+    ax.grid(True)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    handles_dir = [
+        Line2D([0], [0], marker="o", linestyle="none",
+               markerfacecolor=up_color, markeredgecolor="none",
+               markersize=8, label="Upregulated"),
+        Line2D([0], [0], marker="o", linestyle="none",
+               markerfacecolor=down_color, markeredgecolor="none",
+               markersize=8, label="Downregulated"),
+    ]
+
+    leg1 = ax.legend(
+        handles=handles_dir,
+        title="Direction",
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1.0),
+        frameon=False,
+        borderaxespad=0.0,
+        alignment="left"
+    )
+    leg1._legend_box.align = "left"
+
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    leg1_bbox_px = leg1.get_window_extent(renderer=renderer)
+
+    if nmax == nmin:
+        vals = [int(nmin)]
+    else:
+        vals = [int(round(nmin)), int(round((nmin + nmax) / 2.0)), int(round(nmax))]
+
+    handles_size = []
+    for v in vals:
+        if nmax == nmin:
+            s = (min_s + max_s) / 2.0
+        else:
+            s = min_s + (v - nmin) / (nmax - nmin) * (max_s - min_s)
+
+        handles_size.append(
+            Line2D([0], [0], marker="o", linestyle="none",
+                   markerfacecolor=down_color,
+                   markeredgecolor="none",
+                   markersize=float(np.sqrt(s)),
+                   label=str(v))
+        )
+
+    gap_px = 10
+    x_disp, y_disp = ax.transAxes.transform((1.02, 1.0))
+    y2_disp = leg1_bbox_px.y0 - gap_px
+    x2_axes, y2_axes = ax.transAxes.inverted().transform((x_disp, y2_disp))
+
+    leg2 = ax.legend(
+        handles=handles_size,
+        title="Number of proteins",
+        loc="upper left",
+        bbox_to_anchor=(1.02, y2_axes),
+        frameon=False,
+        borderaxespad=0.0,
+        alignment="left"
+    )
+    leg2._legend_box.align = "left"
+
+    ax.add_artist(leg1)
+    return fig
