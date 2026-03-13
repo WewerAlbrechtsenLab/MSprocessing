@@ -59,7 +59,7 @@ def extract_counts(
 
 def filter_samples_by_missingness(
     df: pd.DataFrame,
-    k: float = 3
+    k: float = 1.5
 ) -> pd.DataFrame:
     """
     Identify and remove samples with excessive missing values based on Tukey's rule.
@@ -76,7 +76,7 @@ def filter_samples_by_missingness(
     -------
     pd.DataFrame
         Filtered DataFrame with samples exceeding the missingness threshold removed.
-        Includes an additional index level named 'nan_fraction'.
+        Includes an additional index level named 'protein_count'.
     """
 
     # Count non-missing proteins per sample

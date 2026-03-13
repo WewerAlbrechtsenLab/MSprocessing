@@ -67,14 +67,14 @@ def normalize_sample(
     if method == "mean":
         row_means = vals.mean(axis=1)
         target = row_means.mean()
-        factors = target / row_means
-        df_norm[value_cols] = vals.mul(factors, axis=0)
+        factors = target - row_means
+        df_norm[value_cols] = vals.add(factors, axis=0)
 
     elif method == "median":
         row_meds = vals.median(axis=1)
         target = row_meds.median()
-        factors = target / row_meds
-        df_norm[value_cols] = vals.mul(factors, axis=0)
+        factors = target - row_meds
+        df_norm[value_cols] = vals.add(factors, axis=0)
 
     elif method == "cscore":
         df_norm[value_cols] = vals.apply(robust_zscore, axis=1, result_type="broadcast")

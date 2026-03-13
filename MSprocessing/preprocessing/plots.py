@@ -115,7 +115,7 @@ def plot_protein_counts(df: pd.DataFrame, group: str | None = None) -> go.Figure
 
 def plot_count_boxplot(
     df: pd.DataFrame, 
-    k: float = 3
+    k: float = 1.5
 ) -> go.Figure: 
     """
     Plot missingness per sample as a boxplot and mark Tukey outliers.
