@@ -83,7 +83,7 @@ def volcano_plot(
 
     fig = px.scatter(
         df,
-        x="coef",
+        x="coef" if "coef" in df.columns else "log2fc",
         y="-log10(p-value)",
         color="color",
         color_discrete_map=color_dict,
