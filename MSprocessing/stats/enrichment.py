@@ -120,6 +120,11 @@ def go_enrichment(
         fc_col = "coef"
     else:
         raise ValueError("Input data must contain either 'log2fc' or 'coef' column.")
+    
+    if isinstance(sources, str):
+        sources = [sources]
+    elif not isinstance(sources, list):
+        raise TypeError("sources must be a string or a list of strings.")
 
     data = data.copy()
     data["UniProt_ID"] = data.index.str.split(";").str[0]
@@ -135,12 +140,17 @@ def go_enrichment(
 
         uniprot_by_ontology = id_map.groupby("ontology_id")["uniprot"].apply(list).to_dict()
 
+        original_index = data.index.copy()
+
         data = data.merge(
             conversion[["incoming", "converted", "name"]],
             left_on="UniProt_ID",
             right_on="incoming",
             how="left"
-        ).dropna(subset=["converted"])
+        )
+
+        data.index = original_index
+        data = data.dropna(subset=["converted"])
     else:
         data["converted"] = data["UniProt_ID"]
         uniprot_by_ontology = dict(zip(data["converted"], data["converted"]))
@@ -196,8 +206,14 @@ def go_enrichment(
         results_list.append(results_filtered)
 
     if results_list:
+
         combined = pd.concat(results_list, ignore_index=True)
         combined = combined.sort_values("p_value").reset_index(drop=True)
+
+        combined[f"mean_{fc_col}"] = combined["proteins"].apply(
+            lambda prots: mean_effect(prots, data)
+        )
+
         return combined
 
     print("No significant enrichment found.")
@@ -356,26 +372,41 @@ def make_parent_table(clean_graph, enrichment, root_id="R-HSA-000000"):
 
 
 
-def mean_log2fc(protein_list, log2fc_map):
+def mean_effect(protein_list, dea):
     """
-    Compute the mean fold-change value for a set of proteins in DEA results.
+    Compute the mean effect size for a set of proteins from DEA results.
 
     Parameters
     ----------
     protein_list : list or str
         Protein identifiers, or a string representation of such a list.
-    log2fc_map : pd.Series
-        Mapping from protein identifier to fold-change value.
+    dea : pd.DataFrame
+        Differential expression results containing either a "log2fc" or "coef"
+        column. 
 
     Returns
     -------
     float
-        Mean fold-change across matched proteins, or NaN if none are found.
+        Mean effect size across matched proteins, or NaN if none are found.
     """
     if isinstance(protein_list, str):
         protein_list = ast.literal_eval(protein_list)
-    vals = log2fc_map.reindex(protein_list).dropna()
-    return vals.mean() if len(vals) else np.nan
+
+    if "coef" in dea.columns:
+        fc_col = "coef"
+    elif "log2fc" in dea.columns:
+        fc_col = "log2fc"
+    else:
+        raise ValueError("DEA data must contain either 'coef' or 'log2fc'.")
+    dea = dea.copy()
+    dea["_protein"] = dea.index.astype(str).str.split(";")
+    dea = dea.explode("_protein")
+    dea["_protein"] = dea["_protein"].str.strip()
+
+    effect_map = dea.groupby("protein")[fc_col].mean()
+
+    vals = effect_map.reindex(protein_list).dropna()
+    return vals.mean() if len(vals) else pd.NA
 
 
 
@@ -462,11 +493,8 @@ def cluster_enrichment(enrichment, dea, graph):
     if "protein" not in dea.columns:
         dea = dea.reset_index().rename(columns={"index": "protein"})
 
-    log2fc_map = dea.set_index("protein")[fc_col]
-
-
-    parent_table["mean_coef"] = parent_table["proteins"].apply(
-        mean_log2fc, log2fc_map=log2fc_map
-        )
+    parent_table[f"mean_{fc_col}"] = parent_table["proteins"].apply(
+        lambda prots: mean_effect(prots, dea)
+    )
 
     return parent_table
