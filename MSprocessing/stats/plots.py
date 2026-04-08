@@ -19,7 +19,7 @@ from sklearn.preprocessing import StandardScaler
 def volcano_plot(
     results,
     alpha=0.05,
-    labels=True,
+    labels=None,
     width=600,
     height=500,
     legend=False,
@@ -41,8 +41,8 @@ def volcano_plot(
         and either 'log2fc' or 'coef' columns.
     alpha : float, default=0.05
         Adjusted p-value significance threshold.
-    labels : bool, default=True
-        Whether to display labels for significant points.
+    labels : str | None, default=None
+        Column name to use for labels. If None, no labels are shown.
     width : int, default=600
         Figure width in pixels.
     height : int, default=500
@@ -58,8 +58,8 @@ def volcano_plot(
     -------
     plotly.graph_objects.Figure
     """
-    df = results.copy().reset_index()
-    df = df.rename(columns={"index": "protein"})
+    index_name = results.index.name if results.index.name is not None else "index"
+    df = results.copy().reset_index(names=index_name)
 
     if "coef" in df.columns:
         df["log2fc"] = df["coef"]
@@ -78,8 +78,10 @@ def volcano_plot(
     }
 
     df["label"] = ""
-    if labels:
-        df.loc[df["color"].isin(["up", "down"]), "label"] = df["protein"]
+    if labels is not None:
+        df.loc[df["color"].isin(["up", "down"]), "label"] = df.loc[
+            df["color"].isin(["up", "down"]), labels
+        ]
 
     fig = px.scatter(
         df,
@@ -87,7 +89,7 @@ def volcano_plot(
         y="-log10(p-value)",
         color="color",
         color_discrete_map=color_dict,
-        hover_name="protein",
+        hover_name=index_name,
         text="label",
         template="simple_white",
         **kwargs,
@@ -106,6 +108,7 @@ def volcano_plot(
         yaxis_title="-log10(p-value)",
         paper_bgcolor="white",
         plot_bgcolor="white",
+        font=dict(family="Arial")
     )
 
     return fig

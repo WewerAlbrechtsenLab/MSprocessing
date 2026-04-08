@@ -206,3 +206,117 @@ def within_between_corr(
         "within_mean": np.nanmean(within),
         "between_mean": np.nanmean(between)
     }
+
+
+import pandas as pd
+
+
+
+
+def group_table(
+    df,
+    group,
+    summary_cols=None,
+    stat="median",
+    q=(0.25, 0.75),
+):
+    """
+    Build a summary table with one row per group.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame.
+    group : str or list[str]
+        Column(s) defining groups.
+    summary_cols : list[str] or None
+        Columns to summarize. Numeric columns are reported as median or mean
+        (with optional quantiles). Non-numeric columns are reported as
+        category proportions in a single cell.
+    stat : {"median", "mean"}, default="median"
+        Summary statistic for numeric columns.
+    q : tuple[float, float] or None, default=(0.25, 0.75)
+        Quantiles for numeric columns. If None, only the summary statistic is shown.
+
+    Returns
+    -------
+    pd.DataFrame
+        Summary table with one row per group and an "N" column with counts
+        and cohort percentages.
+    """
+    summary_cols = summary_cols or []
+
+    if isinstance(group, str):
+        group = [group]
+
+    group_col_name = ", ".join(group)
+
+    data = df.copy().dropna(subset=group)
+    total_n = len(data)
+
+    grouped = data.groupby(group)
+    counts = grouped.size()
+
+    category_orders = {}
+    for col in summary_cols:
+        if not pd.api.types.is_numeric_dtype(data[col]):
+            category_orders[col] = (
+                data[col].dropna().astype(str).value_counts(sort=False).index.tolist()
+            )
+
+    rows = []
+
+    for keys, n in counts.items():
+        if not isinstance(keys, tuple):
+            keys = (keys,)
+
+        label = ", ".join(map(str, keys))
+        subset = grouped.get_group(keys if len(group) > 1 else keys[0])
+
+        row = {group_col_name: label}
+        row["N"] = f"{n} ({100 * n / total_n:.1f}%)"
+
+        for col in summary_cols:
+            s = subset[col]
+
+            if pd.api.types.is_numeric_dtype(data[col]):
+                s_num = pd.to_numeric(s, errors="coerce").dropna()
+
+                if len(s_num) == 0:
+                    row[col] = ""
+                    continue
+
+                lo = s_num.quantile(q[0])
+                hi = s_num.quantile(q[1])
+
+                if stat == "median":
+                    center = s_num.median()
+                elif stat == "mean":
+                    center = s_num.mean()
+                else:
+                    raise ValueError('stat must be "median" or "mean"')
+
+                row[col] = f"{center:.1f} ({lo:.1f}, {hi:.1f})"
+
+            else:
+                s_cat = s.astype("object")
+                denom = len(s_cat)
+
+                if denom == 0:
+                    row[col] = ""
+                    continue
+
+                counts_cat = s_cat.dropna().astype(str).value_counts()
+
+                parts = []
+                for cat in category_orders[col]:
+                    k = counts_cat.get(cat, 0)
+                    parts.append(f"{cat} ({100 * k / denom:.1f}%)")
+
+                row[col] = ", ".join(parts)
+
+        rows.append(row)
+
+    out = pd.DataFrame(rows)
+    desired_cols = [group_col_name, "N"] + summary_cols
+    return out.reindex(columns=desired_cols)
