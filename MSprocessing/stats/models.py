@@ -41,9 +41,6 @@ def _prepare_linear_model_inputs(proteome, meta, formula, group_col=None):
     if group_col is not None:
         if group_col not in meta2.columns:
             raise ValueError(f"{group_col} not in meta columns")
-        valid_groups = meta2[group_col].value_counts()[lambda x: x > 1].index
-        meta2 = meta2[meta2[group_col].isin(valid_groups)]
-        proteome2 = proteome2.loc[meta2.index]
 
     return proteome2.copy(), meta2.copy(), vars_in_meta
 
