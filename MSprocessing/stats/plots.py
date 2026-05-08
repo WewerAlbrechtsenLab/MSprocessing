@@ -20,6 +20,7 @@ def volcano_plot(
     results,
     alpha=0.05,
     labels=None,
+    pval_col="pval",
     width=600,
     height=500,
     legend=False,
@@ -64,12 +65,20 @@ def volcano_plot(
     if "coef" in df.columns:
         df["log2fc"] = df["coef"]
 
-    p = df["pval"].astype(float).clip(lower=np.finfo(float).tiny)
+    if pval_col not in df.columns and pval_col != "perm":
+        raise ValueError(f"'{pval_col}' column not found in results DataFrame.")
+    elif pval_col == "perm":
+        pval_col = "pval"
+        padj_col = "padj"
+    else:
+        padj_col = pval_col
+
+    p = df[pval_col].astype(float).clip(lower=np.finfo(float).tiny)
     df["-log10(p-value)"] = -np.log10(p)
 
     df["color"] = "non_sig"
-    df.loc[(df["log2fc"] > 0) & (df["padj"] < alpha), "color"] = "up"
-    df.loc[(df["log2fc"] < 0) & (df["padj"] < alpha), "color"] = "down"
+    df.loc[(df["log2fc"] > 0) & (df[padj_col] < alpha), "color"] = "up"
+    df.loc[(df["log2fc"] < 0) & (df[padj_col] < alpha), "color"] = "down"
 
     color_dict = {
         "non_sig": "#404040",

@@ -59,7 +59,8 @@ def extract_counts(
 
 def filter_samples_by_missingness(
     df: pd.DataFrame,
-    k: float = 1.5
+    k: float = 1.5,
+    print_data=None
 ) -> pd.DataFrame:
     """
     Identify and remove samples with excessive missing values based on Tukey's rule.
@@ -78,7 +79,16 @@ def filter_samples_by_missingness(
         Filtered DataFrame with samples exceeding the missingness threshold removed.
         Includes an additional index level named 'protein_count'.
     """
+    
+    if isinstance(print_data, str):
+        print_data = [print_data]
+    elif print_data is None:
+        print_data = []
 
+    missing_cols = [col for col in print_data if col not in df.index.names]
+    if missing_cols:
+        raise ValueError(f"Columns not found in index: {missing_cols}")
+    
     # Count non-missing proteins per sample
     protein_count = df.notna().sum(axis=1)
 
@@ -92,11 +102,20 @@ def filter_samples_by_missingness(
     if not exclude.empty:
         print(f"Excluded samples ({len(exclude)} total):")
         for idx, val in exclude.items():
-            if isinstance(idx, tuple) and "sample_name" in df.index.names:
-                sample_name = idx[df.index.names.index("sample_name")]
+            if isinstance(idx, tuple):
+                idx_values = dict(zip(df.index.names, idx))
             else:
-                sample_name = idx
-            print(f"  {sample_name}: protein_count = {val:.3f}")
+                idx_values = {df.index.name: idx}
+
+            sample_name = idx_values.get("sample_name", idx)
+
+            extra = ""
+            if print_data:
+                extra = ", " + ", ".join(
+                    f"{col}: {idx_values[col]}" for col in print_data
+                )
+
+            print(f"  {sample_name}: protein_count = {val:.3f}{extra}")
     else:
         print("No samples excluded.")
 
