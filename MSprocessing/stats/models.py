@@ -24,7 +24,7 @@ def _extract_formula_meta_vars(formula, meta_columns):
     return [t for t in tokens if t in meta_columns]
 
 
-def _prepare_linear_model_inputs(proteome, meta, formula, group_col=None):
+def _prepare_linear_model_inputs(proteome, meta, formula, model, group_col=None):
     vars_in_meta = _extract_formula_meta_vars(formula, meta.columns)
 
     common_idx = meta.index.intersection(proteome.index)
@@ -41,11 +41,24 @@ def _prepare_linear_model_inputs(proteome, meta, formula, group_col=None):
     if group_col is not None:
         if group_col not in meta2.columns:
             raise ValueError(f"{group_col} not in meta columns")
+        if model == "ols":
+            keep = meta2[group_col].notna()
+
+            n_removed = (~keep).sum()
+
+            if n_removed > 0:
+                print(
+                    f"Removing {n_removed} observations with missing {group_col} "
+                    f"for OLS with cluster-robust SE"
+                )
+
+            meta2 = meta2.loc[keep]
+            proteome2 = proteome2.loc[meta2.index]
 
     return proteome2.copy(), meta2.copy(), vars_in_meta
 
 
-def _fit_linear_models_chunk(proteome_chunk, meta, formula, group_col=None, reml=True):
+def _fit_linear_models_chunk(proteome_chunk, meta, formula, model="ols", group_col=None, reml=True):
     """
     Fit the same model across a subset of protein columns.
     """
@@ -67,12 +80,21 @@ def _fit_linear_models_chunk(proteome_chunk, meta, formula, group_col=None, reml
 
         try:
             if group_col is not None:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
+                if model == "lmm":
                     m = mixedlm(formula, df, groups=df[group_col], re_formula="1")
                     fit = m.fit(reml=reml, method="lbfgs", disp=False)
+                elif model == "ols":
+                    fit = ols(formula, data=df).fit(
+                        cov_type="cluster",
+                        cov_kwds={"groups": df[group_col]}
+                )
+                else: 
+                    raise ValueError(f"Unsupported model type: {model}")
             else:
-                fit = ols(formula, data=df).fit()
+                if model == "ols":
+                    fit = ols(formula, data=df).fit()
+                else:
+                    raise ValueError(f"Unsupported model type for no group_col: {model}")
 
             for term, coef, pval in zip(fit.params.index, fit.params.values, fit.pvalues.values):
                 results.append({
@@ -109,6 +131,7 @@ def _fit_linear_models_once_preprocessed(
     proteome,
     meta,
     formula,
+    model="ols",
     group_col=None,
     reml=True,
     n_jobs=1,
@@ -125,6 +148,7 @@ def _fit_linear_models_once_preprocessed(
             proteome_chunk=proteome,
             meta=meta,
             formula=formula,
+            model=model,
             group_col=group_col,
             reml=reml,
         )
@@ -144,6 +168,7 @@ def _fit_linear_models_once_preprocessed(
                     prot_chunk,
                     meta,
                     formula,
+                    model,
                     group_col,
                     reml,
                 )
@@ -159,6 +184,7 @@ def _fit_linear_models_once(
     proteome,
     meta,
     formula,
+    model="ols",
     group_col=None,
     reml=True,
     n_jobs=1,
@@ -168,6 +194,7 @@ def _fit_linear_models_once(
         proteome=proteome,
         meta=meta,
         formula=formula,
+        model=model,
         group_col=group_col,
     )
     return _fit_linear_models_once_preprocessed(
@@ -213,12 +240,13 @@ def _resampling_adjust_linear_model(
     proteome,
     meta,
     formula,
-    group_col,
-    reml,
     observed_df,
     adjust,
     n_perm,
     permute_cols,
+    model,
+    group_col=None,
+    reml=True,
     seed=0,
     n_jobs=1,
     chunk_size=None,
@@ -269,6 +297,7 @@ def _resampling_adjust_linear_model(
             proteome=proteome,
             meta=perm_meta,
             formula=formula,
+            model=model,
             group_col=group_col,
             reml=reml,
             n_jobs=n_jobs,
@@ -334,6 +363,7 @@ def run_linear_model(
     proteome,
     meta,
     formula,
+    model="ols",
     group_col=None,
     adjust="fdr_bh",
     reml=True,
@@ -349,6 +379,7 @@ def run_linear_model(
     proteome_prepped, meta_prepped, _ = _prepare_linear_model_inputs(
         proteome=proteome,
         meta=meta,
+        model=model,
         formula=formula,
         group_col=group_col,
     )
@@ -357,6 +388,7 @@ def run_linear_model(
         proteome=proteome_prepped,
         meta=meta_prepped,
         formula=formula,
+        model=model,
         group_col=group_col,
         reml=reml,
         n_jobs=n_jobs,
@@ -377,6 +409,7 @@ def run_linear_model(
                 proteome=proteome_prepped,
                 meta=meta_prepped,
                 formula=formula,
+                model=model,
                 group_col=group_col,
                 reml=reml,
                 observed_df=out,
