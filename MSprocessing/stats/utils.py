@@ -3,6 +3,7 @@ from itertools import combinations
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import pdist, squareform
+from scipy.stats import mannwhitneyu, fisher_exact, chi2_contingency
 from sklearn.preprocessing import StandardScaler
 
 
@@ -320,3 +321,87 @@ def group_table(
     out = pd.DataFrame(rows)
     desired_cols = [group_col_name, "N"] + summary_cols
     return out.reindex(columns=desired_cols)
+
+
+
+def screen_covariates(
+    meta: pd.DataFrame,
+    group_col: str = "primary_analysis",
+    case_label: str = "case"
+) -> pd.DataFrame:
+    """
+    Screen metadata variables for imbalance between case and control samples.
+
+    Parameters
+    ----------
+    meta : pd.DataFrame
+        Metadata table containing the grouping variable and candidate covariates.
+    group_col : str, default="primary_analysis"
+        Column defining the comparison groups.
+    case_label : str, default="case"
+        Value in `group_col` used to define the case group. All other samples are
+        treated as controls.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per tested covariate, sorted by p-value.
+        Numeric variables are tested with a two-sided Mann-Whitney U test.
+        Categorical variables are tested with Fisher's exact test for 2 x 2 tables,
+        otherwise chi-square test of independence.
+        Variables with more than 50% missing values are skipped.
+    """
+    results = []
+
+    group = meta[group_col] == case_label
+
+    for col in meta.columns:
+
+        if col == group_col:
+            continue
+
+        x = meta[col]
+
+        if x.isna().mean() > 0.5:
+            continue
+
+        try:
+
+            if pd.api.types.is_numeric_dtype(x):
+
+                a = x[group].dropna()
+                b = x[~group].dropna()
+
+                stat, p = mannwhitneyu(
+                    a, b,
+                    alternative="two-sided"
+                )
+
+                results.append({
+                    "variable": col,
+                    "type": "numeric",
+                    "pval": p,
+                    "case_mean": a.mean(),
+                    "control_mean": b.mean()
+                })
+
+            else:
+
+                tab = pd.crosstab(x, group)
+
+                if tab.shape == (2, 2):
+                    _, p = fisher_exact(tab)
+                else:
+                    _, p, _, _ = chi2_contingency(tab)
+
+                results.append({
+                    "variable": col,
+                    "type": "categorical",
+                    "pval": p,
+                    "levels": x.nunique()
+                })
+
+        except Exception:
+            pass
+
+    return pd.DataFrame(results).sort_values("pval")
