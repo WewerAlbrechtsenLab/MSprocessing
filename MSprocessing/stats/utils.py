@@ -326,7 +326,7 @@ def group_table(
 
 def screen_covariates(
     meta: pd.DataFrame,
-    group_col: str = "primary_analysis",
+    group_col: str,
     case_label: str = "case"
 ) -> pd.DataFrame:
     """

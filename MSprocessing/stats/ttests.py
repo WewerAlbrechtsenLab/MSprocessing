@@ -247,23 +247,20 @@ def perm_meta_paired(meta, pair_col, group_col, group1, group2, rng):
         Permuted metadata with new pairs and reassigned groups.
     """
     m = meta.copy()
-    valid = m.groupby(pair_col).filter(lambda x: len(x) == 2).index.tolist()
+    
+    for _, idx in m.groupby(pair_col).groups.items():
+        idx = list(idx)
 
-    shuffled_idx = rng.permutation(valid)
-    new_pairs = [shuffled_idx[i:i+2] for i in range(0, len(shuffled_idx), 2)]
+        if len(idx) != 2:
+            continue
 
-    # assign new synthetic subject IDs
-    for new_subj_id, pair_rows in enumerate(new_pairs, start=1):
-        for row in pair_rows:
-            m.at[row, pair_col] = f"perm_subj_{new_subj_id}"
+        vals = m.loc[idx, group_col].tolist()
 
-        if len(pair_rows) == 2:
-            if rng.random() < 0.5:
-                m.at[pair_rows[0], group_col] = group1
-                m.at[pair_rows[1], group_col] = group2
-            else:
-                m.at[pair_rows[0], group_col] = group2
-                m.at[pair_rows[1], group_col] = group1
+        if sorted(vals) != sorted([group1, group2]):
+            continue
+
+        if rng.random() < 0.5:
+            m.loc[idx, group_col] = vals[::-1]
 
     return m
 

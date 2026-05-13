@@ -8,8 +8,6 @@ from MSprocessing.preprocessing.missingness import extract_counts
 
 
 
-import plotly.express as px
-import plotly.graph_objects as go
 
 def plot_count_histogram(
     df: pd.DataFrame,
@@ -89,7 +87,8 @@ def plot_protein_counts(df: pd.DataFrame, group: str | None = None) -> go.Figure
     go.Figure
         Plotly histogram with marginal boxplots.
     """
-    count_df = extract_counts(df, group)
+    count_df = extract_counts(df, group=group)
+
     n_groups = len(count_df[group].unique()) if group and group in count_df.columns else 1
     width = 600 + 400 * (n_groups - 1)
 
@@ -105,11 +104,12 @@ def plot_protein_counts(df: pd.DataFrame, group: str | None = None) -> go.Figure
         width=width,
         height=500,
     )
+
     fig.update_layout(bargap=0.1)
     fig.update_xaxes(range=[0, count_df["proteins"].max()])
     fig.update_yaxes(matches=None)
-    return fig
 
+    return fig
 
 
 
