@@ -367,7 +367,7 @@ def resampling_adjust(
         padj_sorted = np.zeros_like(sorted_p, dtype=float)
 
         for i, p in enumerate(sorted_p):
-            perm_min = np.min(perm_sorted[:, : i+1], axis=1)
+            perm_min = np.min(perm_sorted[:,i : ], axis=1)
             padj_sorted[i] = (np.sum(perm_min <= p) + 1) / (n_perm + 1)
 
         padj_sorted = np.maximum.accumulate(padj_sorted)
@@ -470,10 +470,3 @@ def run_dea(
             df.loc[mask, "padj"] = multipletests(df.loc[mask, "pval"], method=adjust)[1]
 
     return df.set_index("protein").sort_values("pval")
-
-
-
-
-
-
-

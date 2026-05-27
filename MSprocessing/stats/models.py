@@ -343,7 +343,7 @@ def _resampling_adjust_linear_model(
             padj_sorted = np.zeros_like(sorted_p, dtype=float)
 
             for j, p in enumerate(sorted_p):
-                perm_min = np.nanmin(perm_sorted[:, :j + 1], axis=1)
+                perm_min = np.nanmin(perm_sorted[:, j:], axis=1)
                 padj_sorted[j] = (np.sum(perm_min <= p) + 1) / (n_perm + 1)
 
             padj_sorted = np.maximum.accumulate(padj_sorted)
