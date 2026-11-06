@@ -532,15 +532,13 @@ def plot_umap(
     if color_by not in df.index.names:
         raise ValueError(f"'{color_by}' not found in index levels: {df.index.names}")
 
-    color_labels = df.index.get_level_values(color_by)
+    color_labels = df.index.get_level_values(color_by).astype(str)
+
     reducer = umap.UMAP(random_state=1)
     embedding = reducer.fit_transform(df.values)
 
     umap_df = pd.DataFrame(embedding, columns=["UMAP1", "UMAP2"], index=df.index)
-    coerced = pd.to_numeric(color_labels, errors="coerce")
-
-    color_arg = coerced if coerced.notna().all() else color_labels.astype(str)
-    umap_df[color_by] = color_arg
+    umap_df[color_by] = color_labels
 
     fig = px.scatter(
         umap_df,

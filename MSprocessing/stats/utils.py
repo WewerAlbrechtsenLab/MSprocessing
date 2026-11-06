@@ -404,4 +404,11 @@ def screen_covariates(
         except Exception:
             pass
 
-    return pd.DataFrame(results).sort_values("pval")
+    
+    out = pd.DataFrame(results)
+
+    if not out.empty:
+        out["padj"] = multipletests(out["pval"], method="fdr_bh")[1]
+        out = out.sort_values("padj")
+
+    return pd.DataFrame(out).sort_values("padj")
